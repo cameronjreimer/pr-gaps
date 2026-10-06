@@ -84,6 +84,16 @@ gl_epoch <- function(year) {
 ## Ordering used in tables and figures.
 EPOCH_LEVELS <- c("2017_pre", "2018_post", "2020_recovery")
 
+## Short names for figures. The epoch codes carry their role ("_pre", "_post")
+## which is useful in a table but noise on a map, where the year is the point.
+EPOCH_LABELS <- c("2017_pre" = "2017", "2018_post" = "2018",
+                  "2020_recovery" = "2020")
+
+gl_epoch_label <- function(epoch) {
+  label <- EPOCH_LABELS[epoch]
+  ifelse(is.na(label), epoch, label)       # unknown epochs keep their raw code
+}
+
 ## How much of a tile another epoch must cover before that tile counts as
 ## reflown (see n_other_epochs in pr_repeat_tiles.csv).
 ## WHY not something stricter: at this stage the footprints themselves are only

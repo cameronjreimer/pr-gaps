@@ -1,5 +1,3 @@
-
-
 \# 1. List all PR campaigns and files --> pr\_files.csv + pr\_campaigns.csv
 
 gl\_step\_inventory                     (02)
@@ -10,7 +8,7 @@ gl\_step\_inventory                     (02)
 
 &#x20;    a.1.1 gl\_data\_root               (00 config)
 
-&#x20;      a.1.1.1 gl\_code\_root           (00 config) 
+&#x20;      a.1.1.1 gl\_code\_root           (00 config)
 
 &#x20;    a.1.2 gl\_code\_root               (00 config)
 
@@ -34,9 +32,9 @@ gl\_step\_inventory                     (02)
 
 &#x20;  b.3 gl\_epoch                       (00 config)
 
-&#x20;c. gl\_crawl\_all                      (02) 
+&#x20;c. gl\_crawl\_all                      (02)
 
-&#x20;  c.1 gl\_msg                         (00 helpers) 
+&#x20;  c.1 gl\_msg                         (00 helpers)
 
 &#x20;  c.2 gl\_crawl\_campaign              (02)
 
@@ -46,7 +44,7 @@ gl\_step\_inventory                     (02)
 
 &#x20;  c.3 gl\_stack                       (00 helpers)
 
-&#x20;d. gl\_campaign\_summary               (02) 
+&#x20;d. gl\_campaign\_summary               (02)
 
 &#x20;  d.1 gl\_summarise\_one\_campaign      (02)
 
@@ -64,7 +62,7 @@ gl\_step\_inventory                     (02)
 
 gl\_step\_footprints                    (03)
 
-&#x20;a. gl\_init\_dirs                      (00 config) --- not necessary? 
+&#x20;a. gl\_init\_dirs                      (00 config) --- not necessary?
 
 &#x20;b. gl\_try                            (00 helpers)
 
@@ -74,7 +72,7 @@ gl\_step\_footprints                    (03)
 
 &#x20;    c.1.2 gl\_download                (01)
 
-&#x20;    c.1.3 gl\_extract                 (01) 
+&#x20;    c.1.3 gl\_extract                 (01)
 
 &#x20;  c.2 gl\_read\_vector                 (03)
 
@@ -94,7 +92,7 @@ gl\_step\_footprints                    (03)
 
 &#x20;f. gl\_attach\_metadata                (00 helpers)
 
-&#x20;g. gl\_dedupe\_trajectories            (03) 
+&#x20;g. gl\_dedupe\_trajectories            (03)
 
 &#x20;h. gl\_campaign\_footprints            (03)
 
@@ -126,7 +124,7 @@ gl\_step\_repeat                        (04)
 
 &#x20;  b.2 gl\_stack                       (00 helpers)
 
-&#x20;  b.3 gl\_area\_ha                     (00 helpers) 
+&#x20;  b.3 gl\_area\_ha                     (00 helpers)
 
 &#x20;c. gl\_repeat\_coverage                (04)
 
@@ -152,7 +150,7 @@ gl\_step\_repeat                        (04)
 
 &#x20;    e.2.2 gl\_polygon\_parts           (04)
 
-&#x20;    e.2.3 gl\_area\_ha                 (00 helpers) 
+&#x20;    e.2.3 gl\_area\_ha                 (00 helpers)
 
 &#x20;  e.3 gl\_stack                       (00 helpers)
 
@@ -249,7 +247,7 @@ functions to simplify:
 * gl\_read\_vector: not necessary??
 * gl\_polygon\_parts: could be simplified by checking geometry type in gl\_repeat\_coverage
 * have step functions use filepaths instead of variables from ealier steps to make restarting easier
-* why run init\_dirs every time? 
+* why run init\_dirs every time?
 * update plot\_repeat\_map to map specifically which footprints will work (epoch 1-2 + epoch 1-2-3)
 * add PR outline to maps
 
@@ -275,7 +273,7 @@ functions to simplify:
 
 * gl\_code\_root: get code path for setup
 * gl\_data\_root: get data path for setup
-* gl\_epoch: return which epoch a directory corresponds to 
+* gl\_epoch: return which epoch a directory corresponds to
 * gl\_init\_dirs: create dirs for storing data/outputs
 * gl\_paths: write paths relative to set working directory
 
@@ -295,7 +293,7 @@ functions to simplify:
 
 * gl\_crawl\_all: list all of the files for all campaigns in one dataframe
 * gl\_crawl\_campaign: list every file for one campaign
-* gl\_las\_scheme: return las file scheme (one file per flight or per map tile) 
+* gl\_las\_scheme: return las file scheme (one file per flight or per map tile)
 * gl\_list\_campaigns: list every campaign directory, dated and labelled by epoch
 * gl\_parse\_campaign\_name: pull the date and site out of a campaign directory name (handles inconsistent naming)
 * **gl\_step\_footprints**: download, process, merge, and save all campaign footprint to .gpkg
@@ -327,16 +325,16 @@ functions to simplify:
 * gl\_repeat\_coverage: cut epoch polygons against each other
 * gl\_repeat\_summary\_table: total overlay's many small pieces into one row per epoch combination
 * gl\_repeat\_tiles: for every data-bearing tile, get the fraction of it covered by each epoch.
-* **gl\_step\_repeat**: get repeat coveraeg by epoch and write out .gpkg
+* **gl\_step\_repeat**: get repeat coverage by epoch and write out .gpkg
 
 
 
-05 download: 
+05 download:
 
 * gl\_plan\_download: work out which files a request comes to, and where each would be saved.
 * gl\_plan\_size: get size in GB of download plan
 * gl\_repeat\_campaigns: return which flights have repeat coverage for specified epochs
-* **gl\_run\_download**: run download plan (defaults to a dry run which prints the size) 
+* **gl\_run\_download**: run download plan (defaults to a dry run which prints the size)
 
 
 
@@ -355,10 +353,4 @@ functions to simplify:
 * gl\_plot\_repeat\_map: map which footprints have coverage in more than 1 epoch
 * **gl\_step\_report**: map footprints and generate tables of which tiles/footprints are covered in multiple epochs
 * gl\_summarise\_epoch: get one row summarizing a single epoch
-
-
-
-
-
-
 

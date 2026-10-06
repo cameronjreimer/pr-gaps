@@ -3,7 +3,7 @@
 /data/
 *.log
 
-# R session cruft
+# R session stuff
 .Rhistory
 .RData
 .Rproj.user/

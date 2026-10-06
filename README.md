@@ -60,7 +60,7 @@ Small artefacts in `derived/inventory/` (committed):
 | `pr_inventory_by_epoch.csv` | campaigns, flight days, area and track length per epoch |
 | `pr_footprints_chm.gpkg` | exact CHM footprints, for campaigns you have refined |
 | `pr_footprint_summary_chm.csv`, `pr_repeat_summary_chm.csv` | the same, tabulated |
-| `figures/` | coverage by epoch, and the repeat-coverage map |
+| `figures/` | coverage by epoch (one panel per epoch), and the repeat-coverage map |
 
 `--max N` writes a partial inventory over these same paths, so re-run without it
 before trusting `derived/inventory/`.
