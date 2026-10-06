@@ -1,0 +1,37 @@
+# Methods Notes
+
+# To-Do
+- METRICS FILES NOT INCLUDED IN INVENTORY STEP AND pr_files.csv OUTPUT
+- Structure the crawl step to either find ALL files, or specify a list that includes metrics
+
+## What files do we download? 
+
+Determined by the GL_PRODUCTS argument in 05_download.R
+02_crawl.R just finds all available files
+
+- lidar/geotiff
+   - chm: canopy height model
+   - dtm: digital terrain model (bare earth)
+   - dsm: digital surface model (top-of-surface)
+   - slope: slope
+   - (NOT INCLUDED): CHM_mean
+   - (NOT INCLUDED): CHM_rugosity
+   - (NOT INCLUDED): DSM_mean
+   - (NOT INCLUDED): DSM_rugosity
+   - (NOT INCLUDED): aspect
+- lidar/geotiff/metrics
+   - p[0-9]
+   - d[0-9]
+   - mean
+   - qmean
+   - kurt
+- lidar/shp
+   - *tiles.shp: coverage tiles
+- lidar/las
+   - *.las: point cloud files
+- trajectory/shp
+   - *gnd-trajectory.shp: flight trajectory
+- metadata
+   - *metadata.pdf: flight metadata
+- (NOT INCLUDED) photography/orthomosaic
+   - *ortho.tif: high-resolution imagery tiles
