@@ -49,12 +49,60 @@ gl_raster_mask_polygons <- function(r, cell_m) {
   sf::st_make_valid(outline)
 }
 
+## Trace every per-strip GeoTIFF unpacked from a tarred CHM.
+##
+## This is a separate function so that the SpatRasters it opens go out of scope
+## when it returns — see gl_discard_unpacked() below for why that matters.
+gl_trace_unpacked_strips <- function(unpacked_dir, cell_m) {
+  strips <- list.files(unpacked_dir, pattern = "[.]tif$", recursive = TRUE,
+                       full.names = TRUE)
+  if (!length(strips)) return(NULL)
+
+  ## Keep geometry only: the strips carry different attribute values, which
+  ## would stop them stacking together.
+  strip_outlines <- list()
+  for (strip in strips) {
+    traced <- gl_try(gl_raster_mask_polygons(terra::rast(strip), cell_m),
+                     basename(strip))
+    if (is.null(traced)) next
+    strip_outlines[[strip]] <- traced[, attr(traced, "sf_column")]
+  }
+
+  gl_stack(strip_outlines)
+}
+
+## Delete the rasters unpacked from a CHM archive, once they have been traced.
+##
+## WHY: the per-strip GeoTIFFs inside a tarball expand by 7x to 17x. Refining
+## all 241 repeat campaigns would leave 50-110 GB of unpacked rasters behind,
+## for files that exist only to be outlined once. The archive itself is kept, so
+## nothing is lost and re-extracting costs about three seconds.
+##
+## gc() first: terra keeps the GeoTIFF open until the SpatRaster is garbage
+## collected, and Windows refuses to delete a file that is still open. This only
+## works because the rasters were opened inside gl_trace_unpacked_strips(),
+## whose frame has already gone.
+gl_discard_unpacked <- function(unpacked_dir) {
+  if (!dir.exists(unpacked_dir)) return(invisible(FALSE))
+
+  gc(verbose = FALSE)
+  unlink(unpacked_dir, recursive = TRUE, force = TRUE)
+
+  if (dir.exists(unpacked_dir)) {
+    warning("could not remove unpacked rasters: ", unpacked_dir, call. = FALSE)
+    return(invisible(FALSE))
+  }
+  invisible(TRUE)
+}
+
 ## The exact covered area for one campaign.
 ##
 ## Handles both packagings: a single mosaic (_CHM.tif.gz), read straight out of
 ## the gzip by GDAL, and a tar of per-strip GeoTIFFs (_CHM.tar.gz), which has to
 ## be unpacked and traced strip by strip before the parts are merged.
-gl_chm_footprint <- function(campaign, files, cell_m = 10) {
+## `keep_unpacked = TRUE` leaves the extracted strips on disk, which is useful
+## when inspecting a footprint that looks wrong.
+gl_chm_footprint <- function(campaign, files, cell_m = 10, keep_unpacked = FALSE) {
   chm <- files[files$campaign == campaign &
                  grepl("_CHM[.](tif|tar)[.]gz$", files$name), ]
   if (!nrow(chm)) return(NULL)
@@ -74,21 +122,10 @@ gl_chm_footprint <- function(campaign, files, cell_m = 10) {
       length(list.files(unpacked_dir, pattern = "[.]tif$", recursive = TRUE))
     if (!already_unpacked) gl_extract(local_path, unpacked_dir)
 
-    strips <- list.files(unpacked_dir, pattern = "[.]tif$", recursive = TRUE,
-                         full.names = TRUE)
-    if (!length(strips)) return(NULL)
+    outline <- gl_trace_unpacked_strips(unpacked_dir, cell_m)
 
-    ## Trace each strip separately, keeping geometry only: the strips carry
-    ## different attribute values, which would stop them stacking together.
-    strip_outlines <- list()
-    for (strip in strips) {
-      raster <- terra::rast(strip)
-      traced <- gl_try(gl_raster_mask_polygons(raster, cell_m), basename(strip))
-      if (is.null(traced)) next
-      strip_outlines[[strip]] <- traced[, attr(traced, "sf_column")]
-    }
-
-    outline <- gl_stack(strip_outlines)
+    ## Reclaim the disk before returning, including on the empty-result path.
+    if (!keep_unpacked) gl_discard_unpacked(unpacked_dir)
     if (is.null(outline)) return(NULL)
   } else {
     ## /vsigzip/ lets GDAL read the raster without unzipping it to disk first.

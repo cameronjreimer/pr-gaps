@@ -58,6 +58,15 @@ Determined by the GL_PRODUCTS argument in 05_download.R
   A few campaigns (*EV[0-9]_all) are mosaics of a bunch of other flights over the same epoch. These need to be handled
   differently or filtered out, so the is_mosaic column is a flag for this. 
 
+  ## Not including trajectories 
+  These are split up by flight day, not by campaign, so they're not unique. They're also just not very useful, so not worth messing with. 
+
 # 3. Get Repeat Coverage (pr_inventory_by_epoch + pr_repeat_coverage + pr_repeat_summary + pr_repeat_tiles + pr_repeat_pairs)
 
 # 4. Report repeat coverage (pr_inventory_by_epoch + pr_repeat_coverage + pr_repeat_summary + pr_repeat_tiles + pr_repeat_pairs)
+
+# 5. Download 
+
+# 6. Exact footprint with CHMs
+
+  ## Delete .zip files after extracting to save disk space

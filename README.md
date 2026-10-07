@@ -173,8 +173,20 @@ makes density estimates only as good as the denominator).
 
 ```bash
 Rscript scripts/01_build_inventory.R --reuse --refine "re:_EV[0-9]"    # Luquillo blocks, ~300 MB, ~2 min
-Rscript scripts/01_build_inventory.R --reuse --refine repeat           # every repeat candidate, ~7 GB, ~2 h
+Rscript scripts/01_build_inventory.R --reuse --refine repeat           # every repeat candidate, ~7 GB, ~3 h
 ```
+
+Measured cost of the full refinement: downloads run at about 0.75 MB/s from the
+G-LiHT server, so the 7 GB takes roughly 2.7 hours and dominates; tracing adds
+25–40 minutes. It is restartable at file granularity, and refined footprints
+accumulate across runs, so it can be done overnight or in batches.
+
+Most CHMs arrive as a tar of per-strip GeoTIFFs that expand 7–17× when unpacked.
+Those unpacked rasters are deleted as soon as the outline has been traced, which
+holds the refinement to about 8 GB on disk rather than the 50–110 GB it would
+otherwise leave behind. The archives are kept, so re-tracing costs ~3 seconds per
+campaign. Pass `keep_unpacked = TRUE` to `gl_chm_footprint()` when inspecting a
+footprint that looks wrong.
 
 **The gap between the tiers is large, and it runs one way.** For the 14 Luquillo
 EV campaigns the CHM footprint is 20–52% of the tile footprint (median ~0.39):
