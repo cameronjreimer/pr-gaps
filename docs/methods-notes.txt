@@ -1,7 +1,8 @@
 # Methods Notes
 
 # To-Do
-- Update repeat coverage map to show WHICH epochs are shared for each polygon
+- should I keep just the mosaic geotiffs or the tiled ones? 
+
 
 ## What files do we download? 
 
@@ -62,6 +63,10 @@ Determined by the GL_PRODUCTS argument in 05_download.R
 # 4. Report repeat coverage (pr_inventory_by_epoch + pr_repeat_coverage + pr_repeat_summary + pr_repeat_tiles + pr_repeat_pairs)
 
 # 5. Download 
+
+  ## Unpacking files
+  Everything except for .las files are unpacked from their compressed format, then the compressed version is deleted.
+  .las files might not need to be unpacked depending on the package we use to process lidar data. 
 
 # 6. Exact footprint with CHMs
 

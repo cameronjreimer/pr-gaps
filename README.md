@@ -1,4 +1,4 @@
-# G-LiHT Puerto Rico — flight-path inventory and repeat-coverage overlay
+| `figures/` | three maps: coverage by epoch (one panel per epoch), repeat coverage (how many epochs), and epoch combinations (which epochs, one panel each) |# G-LiHT Puerto Rico — flight-path inventory and repeat-coverage overlay
 
 Compiles every G-LiHT Puerto Rico acquisition into a searchable inventory, builds
 coverage footprints for each one, and identifies where the
@@ -70,7 +70,7 @@ Small artefacts in `derived/inventory/` (committed):
 | `pr_inventory_by_epoch.csv` | campaigns, flight days, dates and area per epoch |
 | `pr_footprints_chm.gpkg` | exact CHM footprints, for campaigns you have refined |
 | `pr_footprint_summary_chm.csv`, `pr_repeat_summary_chm.csv` | the same, tabulated |
-| `figures/` | coverage by epoch (one panel per epoch), and the repeat-coverage map |
+| `figures/` | three maps: coverage by epoch (one panel per epoch), repeat coverage (how many epochs cover each piece of ground), and epoch combinations (which epochs, one panel per combination) |
 
 `--max N` writes a partial inventory over these same paths, so re-run without it
 before trusting `derived/inventory/`.
