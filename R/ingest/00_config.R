@@ -39,7 +39,7 @@ gl_paths <- function() {
   list(
     root      = root,
     cache     = file.path(root, "cache", "index"),      # parsed directory listings
-    vector    = file.path(root, "raw", "gliht_vector"), # tile + trajectory shapefiles
+    vector    = file.path(root, "raw", "gliht_vector"), # tile shapefiles
     products  = file.path(root, "raw", "gliht"),        # CHM / DTM / LAS downloads
     runs      = file.path(root, "runs"),                # per-run outputs (A.2)
     out       = file.path(code, "derived", "inventory"),
@@ -109,7 +109,6 @@ CAMPAIGN_SUBDIRS <- c(
   "lidar/shp/",
   "lidar/shp/tiles/",
   "lidar/geotiff/",
-  "trajectory/shp/",
   "metadata/"
 )
 

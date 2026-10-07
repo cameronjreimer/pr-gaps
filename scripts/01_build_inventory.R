@@ -75,9 +75,8 @@ inv <- gl_step_inventory(refresh = refresh, max_campaigns = max_campaigns)
 fp_gpkg <- file.path(gl_paths()$out, "pr_footprints.gpkg")
 if ("--reuse" %in% args && file.exists(fp_gpkg)) {
   gl_msg("reusing ", fp_gpkg)
-  fps <- list(tiles        = st_read(fp_gpkg, "tiles", quiet = TRUE),
-              footprints   = st_read(fp_gpkg, "campaign_footprints", quiet = TRUE),
-              trajectories = st_read(fp_gpkg, "trajectories", quiet = TRUE))
+  fps <- list(tiles      = st_read(fp_gpkg, "tiles", quiet = TRUE),
+              footprints = st_read(fp_gpkg, "campaign_footprints", quiet = TRUE))
 } else {
   fps <- gl_step_footprints(inv$campaigns, inv$files)
 }
@@ -87,7 +86,7 @@ rep <- gl_step_repeat(fps$tiles, fps$footprints)
 
 ## --- Step 4: tables and figures --------------------------------------------
 gl_step_report(fps$footprints, rep$epoch_coverage, rep$repeat_coverage,
-               rep$campaign_pairs, fps$trajectories)
+               rep$campaign_pairs)
 
 ## --- Step 5: what a download would cost ------------------------------------
 ## The 2017 -> 2018 (Hurricane Maria) interval is the chapter's core, so the

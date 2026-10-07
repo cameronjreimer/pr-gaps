@@ -1,13 +1,13 @@
 # G-LiHT Puerto Rico — flight-path inventory and repeat-coverage overlay
 
 Compiles every G-LiHT Puerto Rico acquisition into a searchable inventory, builds
-coverage footprints and flight tracks for each one, and identifies where the
+coverage footprints for each one, and identifies where the
 2017, 2018 and 2020 campaigns overlap. This is the week-1/week-3 machinery in the
 project plan: bulk transfer path, flight metadata, and the usable-swath
 inventory that sets spatial scope (§3.1).
 
 Nothing is downloaded in bulk unless you ask for it. The default run touches only
-directory listings and the small tile/trajectory shapefiles (a few MB total) and
+directory listings and the small tile shapefiles (about 2 MB in total) and
 ends with a *dry-run* download plan.
 
 ## Quick start
@@ -51,13 +51,13 @@ Small artefacts in `derived/inventory/` (committed):
 |---|---|
 | `pr_campaigns.csv` | one row per campaign: date, epoch, block, LAS scheme, file counts and sizes, metadata PDF URL |
 | `pr_files.csv` | every downloadable file across the PR campaigns, with URL and size |
-| `pr_footprints.gpkg` | layers `tiles`, `campaign_footprints`, `trajectories` |
+| `pr_footprints.gpkg` | layers `tiles`, `campaign_footprints` |
 | `pr_footprint_summary.csv` | per-campaign footprint area and provenance |
 | `pr_repeat_coverage.gpkg` | layers `epoch_coverage`, `repeat_coverage`, `repeat_tiles` |
 | `pr_repeat_summary.csv` | hectares by which epochs cover them |
 | `pr_repeat_tiles.csv` | per-tile overlap fraction against each epoch — the table to filter when choosing what to download |
 | `pr_repeat_campaign_pairs.csv` | which flight overlaps which, with area, fraction and days between |
-| `pr_inventory_by_epoch.csv` | campaigns, flight days, area and track length per epoch |
+| `pr_inventory_by_epoch.csv` | campaigns, flight days, dates and area per epoch |
 | `pr_footprints_chm.gpkg` | exact CHM footprints, for campaigns you have refined |
 | `pr_footprint_summary_chm.csv`, `pr_repeat_summary_chm.csv` | the same, tabulated |
 | `figures/` | coverage by epoch (one panel per epoch), and the repeat-coverage map |
@@ -72,13 +72,13 @@ re-run is offline and instant, and an interrupted crawl resumes.
 
 ## What the inventory found
 
-296 Puerto Rico campaigns, 8,294 files, 705 GB on the server.
+296 Puerto Rico campaigns, 7,478 catalogued files, 705 GB on the server.
 
-| Epoch | Campaigns | Flight days | Dates | Tier-1 coverage (ha) | Day track (km) |
-|---|---|---|---|---|---|
-| 2017_pre | 148 | 13 | 2017-03-01 → 03-17 | 135,279 | 10,556 |
-| 2018_post | 120 | 9 | 2018-04-22 → 05-02 | 150,799 | 9,728 |
-| 2020_recovery | 21 | 2 | 2020-03-15 → 03-16 | 34,557 | 2,165 |
+| Epoch | Campaigns | Flight days | Dates | Tier-1 coverage (ha) |
+|---|---|---|---|---|
+| 2017_pre | 148 | 13 | 2017-03-01 → 03-17 | 135,279 |
+| 2018_post | 120 | 9 | 2018-04-22 → 05-02 | 150,799 |
+| 2020_recovery | 21 | 2 | 2020-03-15 → 03-16 | 34,557 |
 
 (Epoch coverage is the dissolved union, so it is smaller than the sum of
 campaign footprints — 189,424 ha in 2017 — by the amount the same-epoch flights
@@ -123,7 +123,7 @@ gl_run_download(plan, dry_run = FALSE)   # fetches
 ```
 
 Products available: `chm`, `dtm`, `dsm`, `slope`, `las`, `metrics`, `metadata`,
-`tiles_shp`, `traj_shp`. Downloads are restartable at file granularity — a file
+`tiles_shp`. Downloads are restartable at file granularity — a file
 already present at the published size is skipped, and every transfer is written
 to `<name>.part` and renamed only on success, so an interrupted run never leaves
 a truncated file that looks complete.
@@ -141,10 +141,13 @@ G-LiHT publishes, per campaign:
   For strip campaigns it is one polygon per strip, 1:1 with the delivered LAS
   (`PR_1March2017_FIA15`: 15 of 15 matched). Either way the polygons are matched
   to delivery by name, and `tile_source` records which case applied.
-- `trajectory/shp/*_gnd-trajectory.shp` — the **whole day's** ground track, not
-  the track for that block. Every campaign flown on 2017-03-01 ships the same
-  533 km line, and `PR_15March2017_EV1`'s is 1127 km against a ~13 km² block.
-  Tracks are therefore de-duplicated by date before any length is summed.
+G-LiHT also publishes a `trajectory/shp/` per campaign, which this workflow
+deliberately ignores: it is the **whole day's** ground track rather than that
+block's, so every campaign flown on 2017-03-01 ships the same 533 km line and
+`PR_15March2017_EV1`'s is 1,127 km against a ~13 km² block. It cannot be used to
+derive coverage — buffering the full 2017 track by a 400 m swath implies 422,230
+ha against the 189,424 ha actually flown, because the track includes ferry legs
+and turns. See ADR 005.
 
 So the footprint is built in two tiers:
 
@@ -228,7 +231,7 @@ G-LIHT/
     R/ingest/00_helpers.R          small shared utilities (areas, stacking, filters)
     R/ingest/01_http.R             cached Apache index parsing, restartable downloads
     R/ingest/02_crawl.R            campaign + file inventory
-    R/ingest/03_footprints.R       tile footprints and flight tracks
+    R/ingest/03_footprints.R       per-campaign coverage footprints
     R/ingest/05_download.R         download planning, execution, manifest
     R/ingest/06_refine_chm.R       exact footprints from CHM valid-data extent
     R/inventory/04_repeat.R        epoch overlay, repeat tiles, campaign pairs
@@ -239,7 +242,7 @@ G-LIHT/
   data/                          <- $PR_GAPS_DATA, never committed
     cache/index/                   directory listings
     raw/gliht/                     downloaded products + MANIFEST.csv
-    raw/gliht_vector/              tile + trajectory shapefiles
+    raw/gliht_vector/              tile shapefiles
     runs/                          per-run outputs (Appendix A.2)
 ```
 

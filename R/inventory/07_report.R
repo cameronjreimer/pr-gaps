@@ -8,46 +8,29 @@
 ## ---------------------------------------------------------------------------
 
 ## One row summarising a single epoch. `rows` is that epoch's slice of the
-## footprint table; `tracks` is the de-duplicated trajectory table, or NULL.
-gl_summarise_epoch <- function(rows, tracks) {
-  epoch <- rows$epoch[1]
-
-  if (is.null(tracks)) {
-    track_km <- NA_real_
-  } else {
-    this_epoch <- tracks$epoch == epoch
-    track_km <- round(sum(tracks$length_km[this_epoch], na.rm = TRUE), 0)
-  }
-
+## footprint table.
+gl_summarise_epoch <- function(rows) {
   data.frame(
-    epoch         = epoch,
+    epoch         = rows$epoch[1],
     n_campaigns   = nrow(rows),
     n_flight_days = length(unique(stats::na.omit(rows$date))),
     first_flight  = as.character(min(rows$date, na.rm = TRUE)),
     last_flight   = as.character(max(rows$date, na.rm = TRUE)),
     tile_area_ha  = round(sum(rows$area_ha), 0),
-    day_track_km  = track_km,
     stringsAsFactors = FALSE
   )
 }
 
 ## One row per epoch: how many flights, over how many days, covering how much.
-##
-## `trajectories` must be the de-duplicated day tracks from gl_step_footprints().
-## Using the raw per-campaign copies would multiply each day's track length by
-## the number of blocks flown that day, since they all ship the same track.
-gl_inventory_by_epoch <- function(footprints, trajectories = NULL, drop_mosaics = TRUE) {
+gl_inventory_by_epoch <- function(footprints, drop_mosaics = TRUE) {
   fp <- sf::st_drop_geometry(footprints)
   fp <- gl_analysis_subset(fp, drop_mosaics)
-
-  tracks <- NULL
-  if (!is.null(trajectories)) tracks <- sf::st_drop_geometry(trajectories)
 
   rows_by_epoch <- split(fp, fp$epoch)
 
   per_epoch <- list()
   for (epoch in names(rows_by_epoch)) {
-    per_epoch[[epoch]] <- gl_summarise_epoch(rows_by_epoch[[epoch]], tracks)
+    per_epoch[[epoch]] <- gl_summarise_epoch(rows_by_epoch[[epoch]])
   }
 
   by_epoch <- gl_stack(per_epoch)
@@ -156,11 +139,11 @@ gl_plot_repeat_map <- function(epoch_cov, rep_cov, path) {
 }
 
 ## Run step 6.
-gl_step_report <- function(footprints, epoch_cov, rep_cov, pairs, trajectories = NULL,
+gl_step_report <- function(footprints, epoch_cov, rep_cov, pairs,
                            drop_mosaics = TRUE) {
   paths <- gl_init_dirs()
 
-  by_epoch <- gl_inventory_by_epoch(footprints, trajectories, drop_mosaics)
+  by_epoch <- gl_inventory_by_epoch(footprints, drop_mosaics)
   gl_write_csv(by_epoch, "pr_inventory_by_epoch.csv")
   gl_msg("inventory by epoch:")
   print(by_epoch)

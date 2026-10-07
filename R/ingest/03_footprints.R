@@ -1,12 +1,8 @@
 ## ---------------------------------------------------------------------------
-## Step 2 — Where did the plane actually fly, and what ground does that cover?
+## Step 2 — What ground did each flight cover?
 ##
-## Two geometries per campaign:
-##   trajectory  the aircraft's ground track
-##   footprint   the ground the lidar actually covered
-##
-## Getting the footprint right takes one non-obvious step. G-LiHT publishes a
-## shapefile of polygons per campaign, but it is not a map of coverage:
+## Getting this right takes one non-obvious step. G-LiHT publishes a shapefile
+## of polygons per campaign, but it is not a map of coverage:
 ##
 ##   * for tile-delivered campaigns it is a complete rectangular grid over the
 ##     campaign's bounding box, and most of its ~1 km tiles are empty — for
@@ -26,33 +22,25 @@
 ## an area that goes into a result.
 ##
 ## Produces:
-##   derived/inventory/pr_footprints.gpkg    layers: tiles, campaign_footprints,
-##                                           trajectories
+##   derived/inventory/pr_footprints.gpkg    layers: tiles, campaign_footprints
 ##   derived/inventory/pr_footprint_summary.csv
 ## ---------------------------------------------------------------------------
 
-## Download a campaign's tile or trajectory shapefile and return the local path.
+## Download a campaign's tile shapefile and return the local path.
 ##
 ## The same shapefile is published three different ways depending on the
 ## campaign — as a .zip, as a .tar.gz one directory down, or as loose .shp/.shx/
 ## .dbf/.prj components — so all three have to be tried. Archives are preferred
 ## because they are one request instead of four and cannot arrive with a
 ## component missing.
-gl_fetch_shapefile <- function(campaign, files, kind = c("tiles", "trajectory")) {
-  kind <- match.arg(kind)
+gl_fetch_tile_shapefile <- function(campaign, files) {
   campaign_files <- files[files$campaign == campaign, , drop = FALSE]
   if (!nrow(campaign_files)) return(NA_character_)
-  dest_dir <- file.path(gl_paths()$vector, campaign, kind)
+  dest_dir <- file.path(gl_paths()$vector, campaign, "tiles")
 
-  patterns <- if (kind == "tiles") {
-    c(zip = "_tiles[.]zip$",
-      tar = "_tiles_shp[.]tar[.]gz$",
-      shp = "_tiles[.]shp$")
-  } else {
-    c(zip = "_trajectory[.]zip$",
-      tar = "_trajectory_shp[.]tar[.]gz$",
-      shp = "gnd-trajectory[.]shp$")
-  }
+  patterns <- c(zip = "_tiles[.]zip$",
+                tar = "_tiles_shp[.]tar[.]gz$",
+                shp = "_tiles[.]shp$")
 
   for (packaging in c("zip", "tar")) {
     archive <- campaign_files[grepl(patterns[[packaging]], campaign_files$name), ]
@@ -107,7 +95,7 @@ gl_read_vector <- function(shp) {
 ## One campaign's published polygons, each flagged with whether a LAS was
 ## actually delivered for it.
 gl_campaign_tiles <- function(campaign, files) {
-  shp <- gl_fetch_shapefile(campaign, files, "tiles")
+  shp <- gl_fetch_tile_shapefile(campaign, files)
   if (is.na(shp)) return(NULL)
   polygons <- gl_read_vector(shp)
   if (!nrow(polygons)) return(NULL)
@@ -133,52 +121,6 @@ gl_campaign_tiles <- function(campaign, files) {
   )
   tiles$area_ha <- gl_area_ha(tiles)
   tiles
-}
-
-## One campaign's flight track.
-##
-## Careful: the published trajectory is the WHOLE DAY's ground track, not the
-## track for this block alone. Every campaign flown on 2017-03-01 ships the same
-## 533 km line, and PR_15March2017_EV1's is 1,127 km against a block of about
-## 13 km². It is useful as context but must be de-duplicated by date before any
-## track length is added up — see gl_step_footprints() below.
-gl_campaign_trajectory <- function(campaign, files) {
-  shp <- gl_fetch_shapefile(campaign, files, "trajectory")
-  if (is.na(shp)) return(NULL)
-  track <- gl_read_vector(shp)
-  if (!nrow(track)) return(NULL)
-
-  track <- sf::st_sf(campaign = campaign,
-                     geometry = sf::st_union(sf::st_geometry(track)))
-  track$length_km <- as.numeric(sf::st_length(track)) / 1000
-  track
-}
-
-## Collapse the duplicated day tracks down to one feature per flight day, and
-## record which campaigns shared each one.
-gl_dedupe_trajectories <- function(traj) {
-  if (is.null(traj) || !nrow(traj)) return(traj)
-
-  ## Same date and same length (to the metre) means the same flight track.
-  day_key <- paste(traj$date, round(traj$length_km, 3))
-
-  ## Keep the first campaign for each distinct track, then record on it the
-  ## names of all the campaigns that shared it.
-  first_of_day <- !duplicated(day_key)
-  kept <- traj[first_of_day, ]
-  kept_keys <- day_key[first_of_day]
-
-  shared_with <- character(nrow(kept))
-  shared_count <- integer(nrow(kept))
-  for (i in seq_along(kept_keys)) {
-    sharing <- traj$campaign[day_key == kept_keys[i]]
-    shared_with[i] <- paste(sharing, collapse = ";")
-    shared_count[i] <- length(sharing)
-  }
-
-  kept$campaigns <- shared_with
-  kept$n_campaigns <- shared_count
-  kept
 }
 
 ## Dissolve each campaign's data-bearing polygons into a single footprint.
@@ -227,25 +169,19 @@ gl_step_footprints <- function(campaigns, files) {
   gl_init_dirs()
   to_build <- campaigns$campaign
 
-  ## Fetch and read both geometries for every campaign. A campaign that fails
-  ## warns and is skipped rather than ending the run.
-  tile_list <- traj_list <- vector("list", length(to_build))
+  ## Fetch and read every campaign's polygons. A campaign that fails warns and
+  ## is skipped rather than ending the run.
+  tile_list <- vector("list", length(to_build))
   for (i in seq_along(to_build)) {
     if (i %% 20 == 1) {
       gl_msg(sprintf("footprints %d/%d: %s", i, length(to_build), to_build[i]))
     }
     tile_list[[i]] <- gl_try(gl_campaign_tiles(to_build[i], files), to_build[i])
-    traj_list[[i]] <- gl_try(gl_campaign_trajectory(to_build[i], files), to_build[i])
   }
   tiles <- gl_stack(tile_list)
-  traj  <- gl_stack(traj_list)
   if (is.null(tiles)) stop("no tile shapefiles could be read for any campaign")
 
   tiles <- gl_attach_metadata(tiles, campaigns)
-  if (!is.null(traj)) {
-    traj <- gl_attach_metadata(traj, campaigns)
-    traj <- gl_dedupe_trajectories(traj)
-  }
 
   ## Which polygons count as coverage. Normally those with a delivered LAS; for
   ## a campaign where nothing matched, all of them, so the campaign is not
@@ -262,8 +198,7 @@ gl_step_footprints <- function(campaigns, files) {
 
   gl_write_gpkg("pr_footprints.gpkg",
                 list(tiles = tiles,
-                     campaign_footprints = footprints,
-                     trajectories = traj))
+                     campaign_footprints = footprints))
   gl_write_csv(sf::st_drop_geometry(footprints), "pr_footprint_summary.csv")
 
   gl_msg(sprintf("footprints: %d campaigns, %d data tiles, %.0f ha of tile coverage",
@@ -275,5 +210,5 @@ gl_step_footprints <- function(campaigns, files) {
   gl_msg("footprint provenance (campaigns x ha):")
   print(cbind(n = campaigns_per_source, ha = round(area_per_source)))
 
-  list(tiles = tiles, footprints = footprints, trajectories = traj)
+  list(tiles = tiles, footprints = footprints)
 }

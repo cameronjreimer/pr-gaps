@@ -25,8 +25,7 @@ GL_PRODUCTS <- list(
   las       = "[.]las[.]gz$",               # the point clouds; by far the largest
   metrics   = "^.*_all_(p[0-9]+|mean|qmean|kurt|d[0-9])[.]tif[.]gz$",
   metadata  = "_metadata[.]pdf$",           # flight altitude, scan angle, dates
-  tiles_shp = "_tiles([.]zip|[.]shp|[.]shx|[.]dbf|[.]prj|_shp[.]tar[.]gz)$",
-  traj_shp  = "(gnd-trajectory[.](shp|shx|dbf|prj)|trajectory_shp[.]tar[.]gz)$"
+  tiles_shp = "_tiles([.]zip|[.]shp|[.]shx|[.]dbf|[.]prj|_shp[.]tar[.]gz)$"
 )
 
 ## Work out which files a request comes to, and where each would be saved.

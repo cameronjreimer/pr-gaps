@@ -141,7 +141,6 @@ gl_summarise_one_campaign <- function(campaign, f) {
     has_dtm       = any(grepl("_DTM[.](tif|tar)", rasters$name)),
     chm_mb        = round(sum(rasters$size_bytes[is_chm], na.rm = TRUE) / 1024^2, 1),
     has_tiles_shp = any(grepl("_tiles([.]zip|[.]shp|_shp[.]tar[.]gz)$", f$name)),
-    has_traj_shp  = any(grepl("(gnd-trajectory[.]shp|trajectory_shp[.]tar[.]gz)$", f$name)),
     metadata_pdf  = paste(f$url[is_pdf], collapse = ";"),
     n_files       = nrow(f),
     total_gb      = round(sum(f$size_bytes, na.rm = TRUE) / 1024^3, 3),
