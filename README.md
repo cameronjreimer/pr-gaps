@@ -27,7 +27,9 @@ Rscript scripts/01_build_inventory.R --reuse --refine "re:_EV[0-9]"   # exact fo
 Flags: `--max N` limits campaigns, `--refresh` ignores cached directory
 listings, `--reuse` reloads the last run's inventory and footprints instead of
 rebuilding them, `--refine <spec>` computes exact CHM footprints (see below),
-and `--download N` turns the dry-run plan into a real transfer (see below).
+`--download N` turns the dry-run plan into a real transfer, and
+`--prune-mosaics` drops the redundant mosaic raster from each archive as it is
+unpacked (both below).
 
 `--reuse` is the one to reach for on a repeat run. The crawl costs no network
 traffic the second time — every directory listing is cached as JSON — but
@@ -215,6 +217,52 @@ Re-running a plan does not re-download what was unpacked. `gl_have_file()`
 accepts either form, so a campaign whose archives are gone but whose GeoTIFFs
 are present counts as held, and `MANIFEST.csv` records each archive's original
 size and MD5 alongside an `unpacked_to` path.
+
+### Mosaic pruning (off by default)
+
+Each raster archive unpacks to one GeoTIFF per flight strip **plus** a
+`<campaign>_mosaic_<product>.tif` holding the same data on one grid. The mosaic
+is exactly the strips merged — measured on two campaigns, identical valid-cell
+counts (495,622 and 815,847), no cell covered by two strips, and no value
+differing by more than 0.0000 — so it can be deleted and rebuilt:
+
+```r
+terra::merge(terra::sprc(lapply(strips, terra::rast)))
+```
+
+That round-trip was verified bit-identical against the published mosaic.
+
+Mosaics are **~61-67% of unpacked raster bytes**, because a mosaic's bounding
+box is mostly empty where the swath runs diagonally (`PR_26April2018_71`'s is
+18.4% valid). Pruning them is therefore the single largest saving available on
+the raster side.
+
+It is **off by default** (`GL_PRUNE_MOSAICS <- FALSE` in `R/ingest/05_download.R`)
+because it deletes data to save space. Three ways to turn it on:
+
+```bash
+Rscript scripts/01_build_inventory.R --reuse --download 5 --prune-mosaics
+```
+
+```r
+gl_run_download(plan, dry_run = FALSE, prune_mosaics = TRUE)   # at download time
+gl_prune_all_mosaics()                      # rasters already on disk: dry run
+gl_prune_all_mosaics(dry_run = FALSE)       # ...and for real
+```
+
+`gl_prune_all_mosaics()` defaults to a dry run that reports what would go.
+A directory holding only a mosaic is never pruned — a campaign that publishes
+no strips has nothing to rebuild from.
+
+**The trade-off.** Strips are cut at flight-strip boundaries that abut exactly,
+so a canopy gap straddling a seam is split across two files unless you merge
+first. Keeping the mosaics costs disk; dropping them costs a merge step before
+delineation.
+
+**Do not substitute a GDAL VRT for the merge.** NoData is stored as `NaN` in
+every G-LiHT raster, and a VRT declares NoData as a number, which `NaN` never
+compares equal to. A VRT over the Guayama strips reported 1,022,902 valid cells
+against the mosaic's 495,622 — it silently turned empty cells into data.
 
 ### Running a test download
 

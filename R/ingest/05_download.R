@@ -133,6 +133,78 @@ gl_plan_sample <- function(plan, n_campaigns) {
 }
 
 ## ---------------------------------------------------------------------------
+## Mosaic pruning — OFF by default.
+##
+## Every raster archive unpacks to one GeoTIFF per flight strip plus a
+## <campaign>_mosaic_<product>.tif holding the same data assembled into one
+## grid. Measured on PR_12March2017_Guayama and PR_26April2018_71, the mosaic
+## is exactly the strips merged: identical valid-cell counts (495,622 and
+## 815,847), no cell covered by two strips, and no value differing by more than
+## 0.0000. terra::merge(sprc(strips)) reproduces it with zero mismatches, so
+## deleting the mosaic loses nothing that cannot be rebuilt.
+##
+## It is worth real disk — mosaics are ~61% of unpacked raster bytes, because a
+## mosaic's bounding box is mostly empty where the swath runs diagonally
+## (PR_26April2018_71's is 18.4% valid). Against that, a gap straddling the
+## seam between two strips is split across two files unless you merge first.
+##
+## WHY it is opt-in rather than automatic: it deletes data to save space, and
+## which side of that trade is right depends on how the rasters get used. Turn
+## it on here, pass prune_mosaics = TRUE to gl_run_download(), or run
+## gl_prune_all_mosaics() over rasters already on disk.
+GL_PRUNE_MOSAICS <- FALSE
+
+## Drop the mosaic rasters from one unpacked directory.
+##
+## Does nothing unless the directory holds both a mosaic and at least one
+## strip: a campaign that publishes only a mosaic has nothing to rebuild it
+## from, and must keep it.
+gl_prune_mosaics <- function(dir, dry_run = TRUE) {
+  nothing <- c(files = 0, bytes = 0)
+
+  rasters <- list.files(dir, pattern = "[.]tif$", recursive = TRUE,
+                        full.names = TRUE)
+  if (!length(rasters)) return(invisible(nothing))
+
+  is_mosaic <- grepl("_mosaic_", basename(rasters))
+  if (!any(is_mosaic) || all(is_mosaic)) return(invisible(nothing))
+
+  freed <- sum(file.size(rasters[is_mosaic]))
+  if (!dry_run) {
+    gc(verbose = FALSE)        # Windows will not delete a file terra still holds
+    unlink(rasters[is_mosaic])
+  }
+  c(files = sum(is_mosaic), bytes = freed)
+}
+
+## Prune every unpacked campaign already on disk. Defaults to a dry run that
+## reports what would go, because this deletes files.
+gl_prune_all_mosaics <- function(dry_run = TRUE) {
+  root <- gl_paths()$products
+  rasters <- list.files(root, pattern = "[.]tif$", recursive = TRUE,
+                        full.names = TRUE)
+  mosaics <- rasters[grepl("_mosaic_", basename(rasters))]
+  if (!length(mosaics)) {
+    gl_msg("no mosaic rasters under ", root)
+    return(invisible(NULL))
+  }
+
+  totals <- c(files = 0, bytes = 0)
+  for (dir in unique(dirname(mosaics))) {
+    totals <- totals + gl_prune_mosaics(dir, dry_run = dry_run)
+  }
+
+  gl_msg(sprintf("%s %d mosaic rasters across %d directories, %.2f GB",
+                 if (dry_run) "would remove" else "removed",
+                 totals[["files"]], length(unique(dirname(mosaics))),
+                 totals[["bytes"]] / 1024^3))
+  if (dry_run) {
+    gl_msg("dry run — call gl_prune_all_mosaics(dry_run = FALSE) to delete")
+  }
+  invisible(totals)
+}
+
+## ---------------------------------------------------------------------------
 ## The manifest: one row per file pulled into raw/, with its source URL, size,
 ## checksum and the time it arrived. Appendix A.2 makes this the record that lets
 ## someone else re-obtain the raw data without this code.
@@ -201,8 +273,12 @@ gl_append_manifest <- function(rows) {
 ## `unpack` names the products whose archives are extracted and then deleted —
 ## see GL_UNPACK_PRODUCTS in 00_config.R for what that costs in disk. Pass
 ## character(0) to leave every download packed.
+##
+## `prune_mosaics` additionally deletes the redundant mosaic raster from each
+## unpacked archive. It is FALSE by default; see GL_PRUNE_MOSAICS above.
 gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE,
-                            unpack = GL_UNPACK_PRODUCTS) {
+                            unpack = GL_UNPACK_PRODUCTS,
+                            prune_mosaics = GL_PRUNE_MOSAICS) {
   if (!nrow(plan)) { gl_msg("nothing to download"); return(invisible(NULL)) }
 
   sizes <- gl_plan_size(plan)
@@ -219,6 +295,7 @@ gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE,
   ## per file, so a long plan does not rewrite the CSV hundreds of times.
   records <- vector("list", nrow(plan))
   n_unpacked <- 0L
+  n_pruned <- 0L
   for (i in seq_len(nrow(plan))) {
     gl_msg(sprintf("[%d/%d] %s", i, nrow(plan), plan$name[i]))
     gl_download(plan$url[i], plan$dest[i], plan$size_bytes[i])
@@ -232,14 +309,22 @@ gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE,
 
     if (plan$product[i] %in% unpack) {
       row$unpacked_to <- gl_unpack_archive(plan$dest[i])
-      if (!is.na(row$unpacked_to)) n_unpacked <- n_unpacked + 1L
+      if (!is.na(row$unpacked_to)) {
+        n_unpacked <- n_unpacked + 1L
+        if (prune_mosaics) {
+          n_pruned <- n_pruned + gl_prune_mosaics(row$unpacked_to,
+                                                  dry_run = FALSE)[["files"]]
+        }
+      }
     }
     records[[i]] <- row
   }
 
   manifest_path <- gl_append_manifest(gl_stack(records))
-  gl_msg(sprintf("downloaded %d files (%d unpacked); manifest: %s",
-                 nrow(plan), n_unpacked, manifest_path))
+  gl_msg(sprintf("downloaded %d files (%d unpacked%s); manifest: %s",
+                 nrow(plan), n_unpacked,
+                 if (n_pruned) sprintf(", %d mosaics pruned", n_pruned) else "",
+                 manifest_path))
   invisible(manifest_path)
 }
 

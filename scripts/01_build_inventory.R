@@ -148,7 +148,12 @@ if (nzchar(download_spec)) {
                  length(unique(test_plan$campaign)),
                  length(unique(plan$campaign)), nrow(test_plan),
                  sum(test_plan$size_bytes, na.rm = TRUE) / 1024^3))
-  gl_run_download(test_plan, dry_run = FALSE)
+
+  ## --prune-mosaics drops the redundant mosaic raster from each archive as it
+  ## is unpacked. Off unless asked for; see GL_PRUNE_MOSAICS in 05_download.R,
+  ## and gl_prune_all_mosaics() for rasters already on disk.
+  gl_run_download(test_plan, dry_run = FALSE,
+                  prune_mosaics = "--prune-mosaics" %in% args)
 }
 
 ## --- Step 6 (opt-in): exact footprints from the CHM ------------------------
