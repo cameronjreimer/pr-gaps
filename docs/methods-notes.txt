@@ -2,9 +2,7 @@
 
 # To-Do
 - Update repeat coverage map to show WHICH epochs are shared for each polygon
-- Don't print 'largest campaign-level overlaps'
-- Change crawl and footprints msgs to 10% . . . 20% . . . etc.
-- add .las files to download plan
+- Why do I have to wait for the crawl to rerun every time I run the download script? 
 
 ## What files do we download? 
 

@@ -11,14 +11,18 @@
 ##   Rscript scripts/01_build_inventory.R              # full run
 ##   Rscript scripts/01_build_inventory.R --max 10     # smoke test, 10 campaigns
 ##   Rscript scripts/01_build_inventory.R --refresh    # ignore cached listings
-##   Rscript scripts/01_build_inventory.R --reuse      # reload the last footprints
+##   Rscript scripts/01_build_inventory.R --reuse      # skip the crawl and the
+##                                                     # footprint rebuild
 ##   Rscript scripts/01_build_inventory.R --refine repeat
+##   Rscript scripts/01_build_inventory.R --reuse --download 2   # test transfer
 ##
 ## Bulk downloads go to $PR_GAPS_DATA (default: the `data/` sibling of this
 ## repository). Inventory artefacts go to derived/inventory/ and are committed.
 ##
 ## Nothing large is downloaded unless you ask: the default run fetches only
 ## directory listings and small shapefiles, and ends with a *dry-run* plan.
+## --download N turns that into a real transfer of the N smallest campaigns,
+## which is the way to test the download path without committing to 544 GB.
 ## ---------------------------------------------------------------------------
 
 ## --- Find the code ---------------------------------------------------------
@@ -67,13 +71,33 @@ refresh <- "--refresh" %in% args
 gl_msg("data root: ", gl_data_root())
 
 ## --- Step 1: what exists ---------------------------------------------------
-inv <- gl_step_inventory(refresh = refresh, max_campaigns = max_campaigns)
+## The crawl makes no network requests on a repeat run — every directory listing
+## was written to disk as JSON the first time it was read. What it still costs is
+## re-opening and re-parsing ~1,800 of those files, about 50 seconds, to rebuild
+## two tables that the last run already wrote out. --reuse skips that.
+##
+## --refresh and --max both change what a crawl would produce, so either one
+## forces a real crawl regardless.
+state_rds <- file.path(gl_paths()$out, "pr_gliht_state.rds")
+reuse <- "--reuse" %in% args
+previous <- NULL
+if (reuse && !refresh && !is.finite(max_campaigns) && file.exists(state_rds)) {
+  previous <- readRDS(state_rds)$inventory
+}
+
+if (!is.null(previous$files) && !is.null(previous$campaigns)) {
+  inv <- previous
+  gl_msg(sprintf("reusing inventory: %d files across %d campaigns (not re-crawled)",
+                 nrow(inv$files), nrow(inv$campaigns)))
+} else {
+  inv <- gl_step_inventory(refresh = refresh, max_campaigns = max_campaigns)
+}
 
 ## --- Step 2: flight paths and coverage footprints --------------------------
 ## Rebuilding reads ~300 small shapefiles and takes a few minutes even when the
 ## downloads are cached, so --reuse reloads the last GeoPackage instead.
 fp_gpkg <- file.path(gl_paths()$out, "pr_footprints.gpkg")
-if ("--reuse" %in% args && file.exists(fp_gpkg)) {
+if (reuse && file.exists(fp_gpkg)) {
   gl_msg("reusing ", fp_gpkg)
   fps <- list(tiles      = st_read(fp_gpkg, "tiles", quiet = TRUE),
               footprints = st_read(fp_gpkg, "campaign_footprints", quiet = TRUE))
@@ -87,14 +111,45 @@ rep <- gl_step_repeat(fps$tiles, fps$footprints)
 ## --- Step 4: tables and figures --------------------------------------------
 gl_step_report(fps$footprints, rep$epoch_coverage, rep$repeat_coverage)
 
-## --- Step 5: what a download would cost ------------------------------------
+## --- Step 5: what a download would cost, and optionally a test transfer ----
 ## The 2017 -> 2018 (Hurricane Maria) interval is the chapter's core, so the
-## plan is built against that overlap. Nothing is fetched while dry_run = TRUE.
+## plan is built against that overlap. The dry run fetches nothing.
 maria <- gl_repeat_campaigns(rep$campaign_pairs, "2017_pre", "2018_post",
                              min_overlap_ha = 25)
 gl_msg(sprintf("%d campaigns carry >=25 ha of 2017 x 2018 overlap", length(maria)))
 plan <- gl_plan_download(inv$files, maria)      # GL_DEFAULT_PRODUCTS, see 00_config.R
 gl_run_download(plan, dry_run = TRUE)
+
+## --download turns the dry run into a real transfer, limited to a number of
+## campaigns so the first one can be a test rather than a week of bandwidth:
+##
+##   --download 2       fetch the 2 smallest campaigns in the plan
+##   --download all     fetch everything in it (544 GB — read the breakdown first)
+##
+## Files already on disk at the published size are skipped, so re-running after
+## an interruption resumes, and raising the number adds campaigns to what is
+## already there rather than starting over.
+download_spec <- get_arg("--download", "")
+if ("--download" %in% args && !nzchar(download_spec)) {
+  stop("--download needs a number of campaigns, or 'all'")
+}
+
+if (nzchar(download_spec)) {
+
+  if (identical(download_spec, "all")) {
+    n_campaigns <- Inf
+  } else {
+    n_campaigns <- suppressWarnings(as.numeric(download_spec))
+    if (is.na(n_campaigns)) stop("--download takes a number of campaigns, or 'all'")
+  }
+
+  test_plan <- gl_plan_sample(plan, n_campaigns)
+  gl_msg(sprintf("downloading %d of %d campaigns: %d files, %.2f GB",
+                 length(unique(test_plan$campaign)),
+                 length(unique(plan$campaign)), nrow(test_plan),
+                 sum(test_plan$size_bytes, na.rm = TRUE) / 1024^3))
+  gl_run_download(test_plan, dry_run = FALSE)
+}
 
 ## --- Step 6 (opt-in): exact footprints from the CHM ------------------------
 ## Step 2's footprints are ~1 km granular and overestimate badly for single

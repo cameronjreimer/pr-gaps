@@ -25,8 +25,16 @@ Rscript scripts/01_build_inventory.R --reuse --refine "re:_EV[0-9]"   # exact fo
 ```
 
 Flags: `--max N` limits campaigns, `--refresh` ignores cached directory
-listings, `--reuse` reloads the last footprint GeoPackage instead of rebuilding
-it, `--refine <spec>` computes exact CHM footprints (see below).
+listings, `--reuse` reloads the last run's inventory and footprints instead of
+rebuilding them, `--refine <spec>` computes exact CHM footprints (see below),
+and `--download N` turns the dry-run plan into a real transfer (see below).
+
+`--reuse` is the one to reach for on a repeat run. The crawl costs no network
+traffic the second time — every directory listing is cached as JSON — but
+re-parsing ~1,800 of those files to rebuild tables the last run already wrote
+still takes about 50 seconds, and the footprint rebuild takes minutes. Reusing
+both turns a full rerun from ~52 s into ~5 s, with identical output. Use a bare
+run (or `--refresh`) when the server may have published something new.
 
 The script locates the repository from its own path, so the working directory
 does not matter. Requires R with `sf`, `terra`, `curl`, `jsonlite`, and
@@ -172,6 +180,29 @@ Downloads are restartable at file granularity — a file already present at the
 published size is skipped, and every transfer is written to `<name>.part` and
 renamed only on success, so an interrupted run never leaves a truncated file
 that looks complete.
+
+### Running a test download
+
+The build script ends with a dry run — a plan and its size, with nothing
+fetched. `--download N` carries that plan out for the N smallest campaigns in
+it, which is how to prove the transfer path before committing to the whole
+thing:
+
+```bash
+Rscript scripts/01_build_inventory.R --reuse --download 1
+```
+
+The smallest campaign in the Maria overlap plans to 77 MB against a median of
+1.1 GB and a largest of 11.5 GB, so a one- or two-campaign test finishes in
+minutes while still exercising every product in `GL_DEFAULT_PRODUCTS`, the
+`.part`/rename restart and the manifest.
+
+`--download all` fetches the entire plan. Read the per-product breakdown the
+dry run prints first — at the ~0.75 MB/s this server has sustained, 544 GB is
+about a week of continuous transfer.
+
+Raising N later adds campaigns to what is already on disk rather than starting
+over, because files present at the published size are skipped.
 
 ## How coverage is determined, and what that costs you
 

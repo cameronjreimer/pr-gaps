@@ -109,6 +109,26 @@ gl_plan_size <- function(plan) {
   data.frame(product = products, n_files = n_files, gb = gigabytes, row.names = NULL)
 }
 
+## Cut a plan down to a few campaigns, for a test transfer.
+##
+## WHY the smallest campaigns rather than the first N: a test run is there to
+## prove that the fetching, the .part/rename restart and the manifest all work
+## end to end, and any campaign demonstrates that equally well — so the ones
+## worth picking are the ones that finish soonest. The spread is wide enough
+## for this to matter: across the 241 campaigns in the Maria overlap the
+## smallest plans to 77 MB and the largest to 11.5 GB, a factor of 150.
+##
+## Every product in the plan is kept, so the test exercises each one.
+gl_plan_sample <- function(plan, n_campaigns) {
+  if (!nrow(plan) || !is.finite(n_campaigns)) return(plan)
+
+  bytes_by_campaign <- tapply(plan$size_bytes, plan$campaign, sum, na.rm = TRUE)
+  smallest_first <- names(sort(bytes_by_campaign))
+  keep <- head(smallest_first, max(0, n_campaigns))
+
+  plan[plan$campaign %in% keep, , drop = FALSE]
+}
+
 ## ---------------------------------------------------------------------------
 ## The manifest: one row per file pulled into raw/, with its source URL, size,
 ## checksum and the time it arrived. Appendix A.2 makes this the record that lets
