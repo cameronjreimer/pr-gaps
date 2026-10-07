@@ -75,8 +75,12 @@ gl_trace_unpacked_strips <- function(unpacked_dir, cell_m) {
 ##
 ## WHY: the per-strip GeoTIFFs inside a tarball expand by 7x to 17x. Refining
 ## all 241 repeat campaigns would leave 50-110 GB of unpacked rasters behind,
-## for files that exist only to be outlined once. The archive itself is kept, so
-## nothing is lost and re-extracting costs about three seconds.
+## for files that exist only to be outlined once, and whose archive is still
+## there — re-extracting costs about three seconds.
+##
+## Only ever called on strips this run extracted. Rasters unpacked by the
+## download step are the kept copy, with no archive behind them, so deleting
+## those would lose data rather than reclaim a cache.
 ##
 ## gc() first: terra keeps the GeoTIFF open until the SpatRaster is garbage
 ## collected, and Windows refuses to delete a file that is still open. This only
@@ -102,6 +106,11 @@ gl_discard_unpacked <- function(unpacked_dir) {
 ## be unpacked and traced strip by strip before the parts are merged.
 ## `keep_unpacked = TRUE` leaves the extracted strips on disk, which is useful
 ## when inspecting a footprint that looks wrong.
+##
+## Both the archive and the already-unpacked form are handled, because the
+## download step now extracts rasters and deletes the archive (see
+## GL_UNPACK_PRODUCTS). Anything this function unpacked itself is cleaned up
+## afterwards; rasters that were already on disk are left exactly as found.
 gl_chm_footprint <- function(campaign, files, cell_m = 10, keep_unpacked = FALSE) {
   chm <- files[files$campaign == campaign &
                  grepl("_CHM[.](tif|tar)[.]gz$", files$name), ]
@@ -111,26 +120,34 @@ gl_chm_footprint <- function(campaign, files, cell_m = 10, keep_unpacked = FALSE
   gl_download(chm$url[1], local_path, chm$size_bytes[1])
 
   ## This writes into raw/, so it belongs in the manifest even though it did not
-  ## come through the download planner.
-  gl_append_manifest(gl_manifest_row(campaign, chm$name[1], chm$url[1],
-                                     local_path, chm$modified[1]))
+  ## come through the download planner. Nothing to record when the archive was
+  ## already held in unpacked form — that row is in the manifest already.
+  if (file.exists(local_path)) {
+    gl_append_manifest(gl_manifest_row(campaign, chm$name[1], chm$url[1],
+                                       local_path, chm$modified[1]))
+  }
 
   if (grepl("[.]tar[.]gz$", local_path)) {
-    unpacked_dir <- file.path(dirname(local_path),
-                              sub("[.]tar[.]gz$", "", basename(local_path)))
-    already_unpacked <- dir.exists(unpacked_dir) &&
-      length(list.files(unpacked_dir, pattern = "[.]tif$", recursive = TRUE))
-    if (!already_unpacked) gl_extract(local_path, unpacked_dir)
+    unpacked_dir <- gl_unpacked_path(local_path)$path
+    we_unpacked <- !gl_unpacked_present(local_path)
+    if (we_unpacked) gl_extract(local_path, unpacked_dir)
 
     outline <- gl_trace_unpacked_strips(unpacked_dir, cell_m)
 
-    ## Reclaim the disk before returning, including on the empty-result path.
-    if (!keep_unpacked) gl_discard_unpacked(unpacked_dir)
+    ## Reclaim the disk before returning, including on the empty-result path —
+    ## but only for strips this call created. Deleting rasters that the
+    ## download step unpacked on purpose would throw away real data.
+    if (we_unpacked && !keep_unpacked) gl_discard_unpacked(unpacked_dir)
     if (is.null(outline)) return(NULL)
   } else {
-    ## /vsigzip/ lets GDAL read the raster without unzipping it to disk first.
-    raster <- terra::rast(paste0("/vsigzip/", normalizePath(local_path, winslash = "/")))
-    outline <- gl_raster_mask_polygons(raster, cell_m)
+    ## /vsigzip/ lets GDAL read the raster without unzipping it to disk first;
+    ## once the archive has been unpacked there is a plain .tif to open instead.
+    source <- if (file.exists(local_path)) {
+      paste0("/vsigzip/", normalizePath(local_path, winslash = "/"))
+    } else {
+      normalizePath(gl_unpacked_path(local_path)$path, winslash = "/")
+    }
+    outline <- gl_raster_mask_polygons(terra::rast(source), cell_m)
     if (is.null(outline)) return(NULL)
   }
 

@@ -2,7 +2,6 @@
 
 # To-Do
 - Update repeat coverage map to show WHICH epochs are shared for each polygon
-- Why do I have to wait for the crawl to rerun every time I run the download script? 
 
 ## What files do we download? 
 

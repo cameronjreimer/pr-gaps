@@ -141,6 +141,22 @@ CAMPAIGN_SUBDIRS <- c(
 GL_DEFAULT_PRODUCTS <- c("chm", "dtm", "slope", "aspect",
                          "pulse_density", "las", "metadata")
 
+## Products unpacked after download, with the archive then deleted.
+##
+## WHY the rasters and not the point clouds: a .tar.gz of GeoTIFFs cannot be
+## opened by anything until it is extracted, so leaving it packed means every
+## later step pays to unpack it again. LAS is left compressed because lasR,
+## lidR and PDAL all read .las.gz directly, and because it is the bulk of the
+## download — 503 GB that would roughly double on disk for no gain.
+##
+## Unpacking costs disk. Measured on PR_12March2017_Guayama, the archives
+## expand by 3.8x (slope) to 9.1x (pulse_density), CHM by 8.4x. Across the full
+## 2017 x 2018 plan that turns ~41 GB of raster archives into ~190 GB of
+## GeoTIFFs. Pass unpack = character(0) to gl_run_download() to keep the
+## archives instead.
+GL_UNPACK_PRODUCTS <- c("chm", "chm_rugosity", "dtm", "slope", "aspect",
+                        "pulse_density", "height_pct", "density_dec")
+
 ## HTTP politeness / robustness.
 HTTP_RETRIES <- 3L
 HTTP_PAUSE   <- 0.15   # seconds between requests

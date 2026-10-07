@@ -130,20 +130,124 @@ gl_index <- function(u, refresh = FALSE) {
   listing
 }
 
-## Download one file.
+## ---------------------------------------------------------------------------
+## Archives, and what counts as "we already have this file".
 ##
-## Two things make this restartable. A file already on disk at roughly the
-## published size is left alone, so re-running a part-finished download plan
-## only fetches what is missing. And the transfer writes to "<name>.part" and
-## renames it only on success, so an interrupted run can never leave a
-## half-written file that looks complete to the next run.
+## Most G-LiHT rasters arrive compressed and are unusable in that form: a
+## <campaign>_CHM.tar.gz has to be unpacked before anything can open the
+## GeoTIFFs inside it. Once it has been, keeping the archive as well is just a
+## second copy, so gl_unpack_archive() deletes it.
+##
+## That breaks the obvious way of asking whether a file has already been
+## fetched — "is it on disk at the published size?" — because the thing that is
+## on disk is now the unpacked form under a different name. gl_have_file()
+## accepts either, which is what stops the next run downloading all of it again.
+## ---------------------------------------------------------------------------
+
+## Where an archive's contents end up. A tar or zip unpacks into a directory
+## named after it; any other .gz is a single file with the suffix removed.
+##   PR_X_CHM.tar.gz   -> directory PR_X_CHM/
+##   PR_X_CHM.tif.gz   -> file      PR_X_CHM.tif
+gl_unpacked_path <- function(archive) {
+  if (grepl("[.](tar[.]gz|tgz|zip)$", archive, ignore.case = TRUE)) {
+    list(kind = "dir",
+         path = sub("[.](tar[.]gz|tgz|zip)$", "", archive, ignore.case = TRUE))
+  } else if (grepl("[.]gz$", archive, ignore.case = TRUE)) {
+    list(kind = "file", path = sub("[.]gz$", "", archive, ignore.case = TRUE))
+  } else {
+    list(kind = "none", path = NA_character_)
+  }
+}
+
+## Has this archive already been unpacked, and is the result still there?
+gl_unpacked_present <- function(archive) {
+  target <- gl_unpacked_path(archive)
+  if (target$kind == "dir") {
+    dir.exists(target$path) &&
+      length(list.files(target$path, recursive = TRUE)) > 0
+  } else if (target$kind == "file") {
+    file.exists(target$path) && file.size(target$path) > 0
+  } else {
+    FALSE
+  }
+}
+
+## Do we already hold this file, in either form?
 ##
 ## `approx_bytes` is the rounded size from the directory listing, so the check
-## allows 20% slack; it catches a truncated file, not a corrupted one.
+## allows 20% slack; it catches a truncated download, not a corrupted one. The
+## unpacked form gets no size check — the published size describes the archive,
+## and what it expands to is not knowable in advance.
+gl_have_file <- function(dest, approx_bytes = NA_real_) {
+  if (file.exists(dest)) {
+    close_enough <- is.na(approx_bytes) ||
+      abs(file.size(dest) - approx_bytes) <= 0.2 * approx_bytes
+    if (close_enough) return(TRUE)
+  }
+  gl_unpacked_present(dest)
+}
+
+## Decompress a plain .gz to a named file, in 4 MB chunks so that a large
+## raster never has to fit in memory. (R has no gunzip of its own, and pulling
+## in R.utils for one function is not worth the dependency.)
+gl_gunzip <- function(src, dest) {
+  input <- gzfile(src, "rb")
+  on.exit(close(input), add = TRUE)
+  output <- file(dest, "wb")
+  on.exit(close(output), add = TRUE)
+
+  repeat {
+    chunk <- readBin(input, "raw", n = 4L * 1024^2)
+    if (!length(chunk)) break
+    writeBin(chunk, output)
+  }
+  invisible(dest)
+}
+
+## Unpack an archive and, by default, delete it.
+##
+## The archive is only deleted once the unpacked form has been confirmed to
+## exist, so a failed extraction leaves the download intact rather than losing
+## both copies. Calling this on something already unpacked does nothing and
+## reports where the contents are.
+gl_unpack_archive <- function(archive, discard = TRUE) {
+  target <- gl_unpacked_path(archive)
+  if (target$kind == "none") return(invisible(NA_character_))
+
+  if (!file.exists(archive)) {
+    ## Nothing to do — either it was unpacked on an earlier run, or it is gone.
+    return(invisible(if (gl_unpacked_present(archive)) target$path else NA_character_))
+  }
+
+  if (target$kind == "dir") {
+    gl_extract(archive, target$path)
+  } else {
+    gl_gunzip(archive, target$path)
+  }
+
+  if (!gl_unpacked_present(archive)) {
+    warning("nothing unpacked from ", basename(archive), "; archive kept",
+            call. = FALSE)
+    return(invisible(NA_character_))
+  }
+
+  if (discard) unlink(archive)
+  invisible(target$path)
+}
+
+## Download one file.
+##
+## Two things make this restartable. A file we already hold is left alone, so
+## re-running a part-finished download plan only fetches what is missing. And
+## the transfer writes to "<name>.part" and renames it only on success, so an
+## interrupted run can never leave a half-written file that looks complete to
+## the next run.
+##
+## "Already hold" is gl_have_file()'s question, not a plain file.exists(): an
+## archive that has been unpacked and deleted still counts, or every unpacked
+## download would be fetched again on the next run.
 gl_download <- function(u, dest, approx_bytes = NA_real_, retries = HTTP_RETRIES) {
-  already_complete <- file.exists(dest) &&
-    (is.na(approx_bytes) || abs(file.size(dest) - approx_bytes) <= 0.2 * approx_bytes)
-  if (already_complete) return(invisible(dest))
+  if (gl_have_file(dest, approx_bytes)) return(invisible(dest))
 
   dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
   partial <- paste0(dest, ".part")

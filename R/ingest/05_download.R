@@ -80,8 +80,11 @@ gl_plan_download <- function(files, campaigns, products = GL_DEFAULT_PRODUCTS) {
   wanted <- wanted[keep, , drop = FALSE]
   if (!nrow(wanted)) return(wanted)
 
-  wanted$dest <- file.path(gl_paths()$products, wanted$campaign, wanted$subdir,
-                           wanted$name)
+  ## sub() trims the subdirectory's trailing slash first: without it every path
+  ## comes out with a doubled separator, which works but is then recorded that
+  ## way in the manifest.
+  wanted$dest <- file.path(gl_paths()$products, wanted$campaign,
+                           sub("/+$", "", wanted$subdir), wanted$name)
 
   ## Label each file with the product it belongs to, for the size breakdown.
   ## Assigning in reverse order means the first matching product wins.
@@ -144,8 +147,13 @@ gl_plan_sample <- function(plan, n_campaigns) {
 ## ---------------------------------------------------------------------------
 
 ## Describe one file that has just been downloaded.
+##
+## `unpacked_to` is filled in afterwards, once the archive has been extracted:
+## the row has to be built first, while the archive is still on disk, because
+## its size and checksum cannot be recovered once it has been deleted.
 gl_manifest_row <- function(campaign, name, url, dest,
-                            server_modified = NA_character_, verify_md5 = TRUE) {
+                            server_modified = NA_character_, verify_md5 = TRUE,
+                            unpacked_to = NA_character_) {
   data.frame(
     campaign        = campaign,
     name            = name,
@@ -154,6 +162,7 @@ gl_manifest_row <- function(campaign, name, url, dest,
     bytes           = file.size(dest),
     server_modified = server_modified,
     md5             = if (verify_md5) unname(tools::md5sum(dest)) else NA_character_,
+    unpacked_to     = unpacked_to,
     downloaded_utc  = format(Sys.time(), tz = "UTC", usetz = TRUE),
     stringsAsFactors = FALSE
   )
@@ -167,7 +176,14 @@ gl_append_manifest <- function(rows) {
   manifest_path <- file.path(gl_paths()$products, "MANIFEST.csv")
   if (file.exists(manifest_path)) {
     previous <- utils::read.csv(manifest_path, stringsAsFactors = FALSE)
-    rows <- rbind(previous[!(previous$url %in% rows$url), ], rows)
+    previous <- previous[!(previous$url %in% rows$url), , drop = FALSE]
+
+    ## A manifest written before a column existed is missing it. Give each side
+    ## the other's columns as NA so the two can be stacked.
+    for (column in setdiff(names(rows), names(previous))) previous[[column]] <- NA
+    for (column in setdiff(names(previous), names(rows))) rows[[column]] <- NA
+
+    rows <- rbind(previous[, names(rows), drop = FALSE], rows)
   }
 
   dir.create(dirname(manifest_path), recursive = TRUE, showWarnings = FALSE)
@@ -178,10 +194,15 @@ gl_append_manifest <- function(rows) {
 ## Carry out a plan.
 ##
 ## Defaults to a dry run, which prints the size and fetches nothing — call it
-## again with dry_run = FALSE to transfer. The transfer is restartable: files
-## already present at the published size are skipped (see gl_download), so
-## re-running after an interruption picks up the remainder.
-gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE) {
+## again with dry_run = FALSE to transfer. The transfer is restartable: files we
+## already hold are skipped (see gl_download), so re-running after an
+## interruption picks up the remainder.
+##
+## `unpack` names the products whose archives are extracted and then deleted —
+## see GL_UNPACK_PRODUCTS in 00_config.R for what that costs in disk. Pass
+## character(0) to leave every download packed.
+gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE,
+                            unpack = GL_UNPACK_PRODUCTS) {
   if (!nrow(plan)) { gl_msg("nothing to download"); return(invisible(NULL)) }
 
   sizes <- gl_plan_size(plan)
@@ -193,19 +214,32 @@ gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE) {
     return(invisible(sizes))
   }
 
-  ## Fetch each file and describe what arrived. The manifest is written once at
-  ## the end rather than per file, so a long plan does not rewrite the CSV
-  ## hundreds of times.
+  ## Fetch each file, unpack it if it is one of the archived products, and
+  ## describe what arrived. The manifest is written once at the end rather than
+  ## per file, so a long plan does not rewrite the CSV hundreds of times.
   records <- vector("list", nrow(plan))
+  n_unpacked <- 0L
   for (i in seq_len(nrow(plan))) {
     gl_msg(sprintf("[%d/%d] %s", i, nrow(plan), plan$name[i]))
     gl_download(plan$url[i], plan$dest[i], plan$size_bytes[i])
-    records[[i]] <- gl_manifest_row(plan$campaign[i], plan$name[i], plan$url[i],
-                                    plan$dest[i], plan$modified[i], verify_md5)
+
+    ## A file we already held in unpacked form has no archive to measure, and
+    ## its original row is already in the manifest — leave that row alone.
+    if (!file.exists(plan$dest[i])) next
+
+    row <- gl_manifest_row(plan$campaign[i], plan$name[i], plan$url[i],
+                           plan$dest[i], plan$modified[i], verify_md5)
+
+    if (plan$product[i] %in% unpack) {
+      row$unpacked_to <- gl_unpack_archive(plan$dest[i])
+      if (!is.na(row$unpacked_to)) n_unpacked <- n_unpacked + 1L
+    }
+    records[[i]] <- row
   }
 
   manifest_path <- gl_append_manifest(gl_stack(records))
-  gl_msg(sprintf("downloaded %d files; manifest: %s", nrow(plan), manifest_path))
+  gl_msg(sprintf("downloaded %d files (%d unpacked); manifest: %s",
+                 nrow(plan), n_unpacked, manifest_path))
   invisible(manifest_path)
 }
 

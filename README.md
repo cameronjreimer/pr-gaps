@@ -176,10 +176,45 @@ also mixes canopy and terrain into one number, so for structural heterogeneity
 prefer `chm_rugosity` over `dsm_rugosity` — the latter measures terrain
 roughness as much as canopy roughness on sloping ground.
 
-Downloads are restartable at file granularity — a file already present at the
-published size is skipped, and every transfer is written to `<name>.part` and
-renamed only on success, so an interrupted run never leaves a truncated file
-that looks complete.
+Downloads are restartable at file granularity — a file we already hold is
+skipped, and every transfer is written to `<name>.part` and renamed only on
+success, so an interrupted run never leaves a truncated file that looks
+complete.
+
+### Unpacking, and what that costs
+
+Raster products arrive as `.tar.gz` (a tar of per-strip GeoTIFFs) or `.tif.gz`
+(a single mosaic), and nothing can open either without extracting it. So the
+download step unpacks them and deletes the archive:
+
+```
+lidar/geotiff/PR_12March2017_Guayama_CHM/
+    PR_12March2017_Guayama_l0s0_CHM.tif
+    PR_12March2017_Guayama_l0s1_CHM.tif
+    PR_12March2017_Guayama_mosaic_CHM.tif
+lidar/las/PR_12March2017_Guayama_l0s0.las.gz        <- left compressed
+```
+
+A `.tar.gz` becomes a directory of the same name; a `.tif.gz` becomes the
+`.tif` beside it. The archive is removed only after the unpacked form is
+confirmed present, so a failed extraction leaves the download intact.
+
+`GL_UNPACK_PRODUCTS` in `R/ingest/00_config.R` controls which products this
+applies to — the rasters, not LAS. Point clouds stay gzipped because lidR,
+lasR and PDAL all read `.las.gz` directly, and because at 503 GB they are the
+bulk of the download. Pass `unpack = character(0)` to `gl_run_download()` to
+keep every archive instead.
+
+**This trades disk for usability.** Measured on `PR_12March2017_Guayama`, the
+archives expand by 3.8× (slope) to 9.1× (pulse_density), with CHM at 8.4×:
+12.3 MB of archives became 55.9 MB of GeoTIFFs. Across the full 2017 × 2018
+plan that turns ~41 GB of raster archives into roughly 190 GB on disk — so
+budget about 690 GB for the whole thing rather than 544 GB.
+
+Re-running a plan does not re-download what was unpacked. `gl_have_file()`
+accepts either form, so a campaign whose archives are gone but whose GeoTIFFs
+are present counts as held, and `MANIFEST.csv` records each archive's original
+size and MD5 alongside an `unpacked_to` path.
 
 ### Running a test download
 
