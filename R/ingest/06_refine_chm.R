@@ -62,6 +62,11 @@ gl_chm_footprint <- function(campaign, files, cell_m = 10) {
   local_path <- file.path(gl_paths()$products, campaign, chm$subdir[1], chm$name[1])
   gl_download(chm$url[1], local_path, chm$size_bytes[1])
 
+  ## This writes into raw/, so it belongs in the manifest even though it did not
+  ## come through the download planner.
+  gl_append_manifest(gl_manifest_row(campaign, chm$name[1], chm$url[1],
+                                     local_path, chm$modified[1]))
+
   if (grepl("[.]tar[.]gz$", local_path)) {
     unpacked_dir <- file.path(dirname(local_path),
                               sub("[.]tar[.]gz$", "", basename(local_path)))

@@ -66,9 +66,11 @@ Small artefacts in `derived/inventory/` (committed):
 before trusting `derived/inventory/`.
 
 Bulk data goes to `$PR_GAPS_DATA/raw/gliht/<campaign>/...`, mirroring the server
-layout, with `MANIFEST.csv` recording source URL, size, md5 and download time.
-Directory listings are cached under `$PR_GAPS_DATA/cache/index` as JSON, so a
-re-run is offline and instant, and an interrupted crawl resumes.
+layout, with `MANIFEST.csv` recording source URL, size, md5 and download time for
+every file that lands there — whether it came from the download planner or from
+the CHM refinement. Directory listings are cached under
+`$PR_GAPS_DATA/cache/index` as JSON, so a re-run is offline and instant, and an
+interrupted crawl resumes.
 
 ## What the inventory found
 
@@ -242,9 +244,21 @@ G-LIHT/
   data/                          <- $PR_GAPS_DATA, never committed
     cache/index/                   directory listings
     raw/gliht/                     downloaded products + MANIFEST.csv
-    raw/gliht_vector/              tile shapefiles
+    interim/tile_shapefiles/       tile shapefiles, unpacked — regenerable
     runs/                          per-run outputs (Appendix A.2)
 ```
+
+Three tiers, each with a different claim on you:
+
+- **`raw/`** is immutable (Appendix A.3). Everything in it is listed in
+  `MANIFEST.csv` with its source URL, size, md5 and arrival time, so someone
+  else can re-obtain it without this code. Safe to set read-only after ingest.
+- **`interim/`** is reproducible from `raw/` plus the URLs in `pr_files.csv`, and
+  is written to on any run — the published shapefiles arrive as a `.zip` and get
+  unpacked here, which is why this is not raw data and not manifested. Safe to
+  delete; the next run refetches it.
+- **`cache/`** holds the parsed directory listings. Deleting it costs a re-crawl
+  (~8 minutes), nothing more.
 
 The empty `src/` siblings from Appendix A.1 (`align/`, `detect/`, `classify/`,
 `delineate/`, `validate/`, `stats/`) are not created yet; add them under `R/` as

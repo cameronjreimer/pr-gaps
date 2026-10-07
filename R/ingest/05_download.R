@@ -69,6 +69,52 @@ gl_plan_size <- function(plan) {
   data.frame(product = products, n_files = n_files, gb = gigabytes, row.names = NULL)
 }
 
+## ---------------------------------------------------------------------------
+## The manifest: one row per file pulled into raw/, with its source URL, size,
+## checksum and the time it arrived. Appendix A.2 makes this the record that lets
+## someone else re-obtain the raw data without this code.
+##
+## WHY these are separate from gl_run_download(): files reach raw/ by two
+## routes — the download planner below, and the CHM refinement in
+## 06_refine_chm.R — and both have to be recorded, or the manifest describes
+## only part of what is on disk.
+##
+## Note that the tile shapefiles are NOT manifested. They live in interim/,
+## are regenerable from the URLs in pr_files.csv, and are not raw data.
+## ---------------------------------------------------------------------------
+
+## Describe one file that has just been downloaded.
+gl_manifest_row <- function(campaign, name, url, dest,
+                            server_modified = NA_character_, verify_md5 = TRUE) {
+  data.frame(
+    campaign        = campaign,
+    name            = name,
+    url             = url,
+    dest            = dest,
+    bytes           = file.size(dest),
+    server_modified = server_modified,
+    md5             = if (verify_md5) unname(tools::md5sum(dest)) else NA_character_,
+    downloaded_utc  = format(Sys.time(), tz = "UTC", usetz = TRUE),
+    stringsAsFactors = FALSE
+  )
+}
+
+## Merge rows into MANIFEST.csv. A new row replaces any older entry for the same
+## URL, so re-downloading a file updates its record rather than duplicating it.
+gl_append_manifest <- function(rows) {
+  if (is.null(rows) || !nrow(rows)) return(invisible(NULL))
+
+  manifest_path <- file.path(gl_paths()$products, "MANIFEST.csv")
+  if (file.exists(manifest_path)) {
+    previous <- utils::read.csv(manifest_path, stringsAsFactors = FALSE)
+    rows <- rbind(previous[!(previous$url %in% rows$url), ], rows)
+  }
+
+  dir.create(dirname(manifest_path), recursive = TRUE, showWarnings = FALSE)
+  utils::write.csv(rows, manifest_path, row.names = FALSE)
+  invisible(manifest_path)
+}
+
 ## Carry out a plan.
 ##
 ## Defaults to a dry run, which prints the size and fetches nothing — call it
@@ -87,38 +133,20 @@ gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE) {
     return(invisible(sizes))
   }
 
-  ## Fetch each file and record what arrived.
+  ## Fetch each file and describe what arrived. The manifest is written once at
+  ## the end rather than per file, so a long plan does not rewrite the CSV
+  ## hundreds of times.
   records <- vector("list", nrow(plan))
   for (i in seq_len(nrow(plan))) {
     gl_msg(sprintf("[%d/%d] %s", i, nrow(plan), plan$name[i]))
     gl_download(plan$url[i], plan$dest[i], plan$size_bytes[i])
-    records[[i]] <- data.frame(
-      campaign        = plan$campaign[i],
-      name            = plan$name[i],
-      url             = plan$url[i],
-      dest            = plan$dest[i],
-      bytes           = file.size(plan$dest[i]),
-      server_modified = plan$modified[i],
-      md5             = if (verify_md5) unname(tools::md5sum(plan$dest[i]))
-                        else NA_character_,
-      downloaded_utc  = format(Sys.time(), tz = "UTC", usetz = TRUE),
-      stringsAsFactors = FALSE
-    )
+    records[[i]] <- gl_manifest_row(plan$campaign[i], plan$name[i], plan$url[i],
+                                    plan$dest[i], plan$modified[i], verify_md5)
   }
-  manifest <- gl_stack(records)
 
-  ## Merge into any existing manifest, with the newly fetched rows replacing
-  ## older entries for the same URL.
-  manifest_path <- file.path(gl_paths()$products, "MANIFEST.csv")
-  if (file.exists(manifest_path)) {
-    previous <- utils::read.csv(manifest_path, stringsAsFactors = FALSE)
-    manifest <- rbind(previous[!(previous$url %in% manifest$url), ], manifest)
-  }
-  dir.create(dirname(manifest_path), recursive = TRUE, showWarnings = FALSE)
-  utils::write.csv(manifest, manifest_path, row.names = FALSE)
-
+  manifest_path <- gl_append_manifest(gl_stack(records))
   gl_msg(sprintf("downloaded %d files; manifest: %s", nrow(plan), manifest_path))
-  invisible(manifest)
+  invisible(manifest_path)
 }
 
 ## The campaigns holding repeat coverage between two epochs — the usual input to

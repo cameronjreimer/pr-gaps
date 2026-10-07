@@ -3,9 +3,11 @@
 # To-Do
 - METRICS FILES NOT INCLUDED IN INVENTORY STEP AND pr_files.csv OUTPUT
 - Structure the crawl step to either find ALL files, or specify a list that includes metrics
-- Remove everything related to trajectories
 - Add PR outline to coverage map
 - Update repeat coverage map to show WHICH epochs are shared for each polygon
+- Don't print 'largest campaign-level overlaps'
+- Change crawl and footprints msgs to 10% . . . 20% . . . etc.
+- add .las files to download plan
 
 ## What files do we download? 
 

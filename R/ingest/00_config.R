@@ -33,15 +33,21 @@ gl_data_root <- function() {
 ## (~11 MB) to live in the repository, where git backs them up and records how
 ## they changed — a deliberate departure from Appendix A.2, which puts derived/
 ## in the data root. Run outputs, which are large, still go to runs/ there.
+## WHY `vector` sits under interim/ and not raw/: that directory holds the
+## shapefile components unpacked out of the published .zip, so it is partly
+## derived. Appendix A.3 wants raw/ to be immutable and set read-only after
+## ingest, which is only possible if nothing in it is rewritten — and archives
+## may be re-extracted on any run. Everything in interim/ is reproducible from
+## raw/ plus the URLs in pr_files.csv.
 gl_paths <- function() {
   root <- gl_data_root()
   code <- gl_code_root()
   list(
     root      = root,
-    cache     = file.path(root, "cache", "index"),      # parsed directory listings
-    vector    = file.path(root, "raw", "gliht_vector"), # tile shapefiles
-    products  = file.path(root, "raw", "gliht"),        # CHM / DTM / LAS downloads
-    runs      = file.path(root, "runs"),                # per-run outputs (A.2)
+    cache     = file.path(root, "cache", "index"),            # directory listings
+    vector    = file.path(root, "interim", "tile_shapefiles"),
+    products  = file.path(root, "raw", "gliht"),              # CHM / DTM / LAS
+    runs      = file.path(root, "runs"),                      # per-run outputs (A.2)
     out       = file.path(code, "derived", "inventory"),
     figures   = file.path(code, "derived", "inventory", "figures")
   )
