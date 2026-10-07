@@ -29,7 +29,9 @@ listings, `--reuse` reloads the last footprint GeoPackage instead of rebuilding
 it, `--refine <spec>` computes exact CHM footprints (see below).
 
 The script locates the repository from its own path, so the working directory
-does not matter. Requires R with `sf`, `terra`, `curl`, `jsonlite`.
+does not matter. Requires R with `sf`, `terra`, `curl`, `jsonlite`, and
+optionally `tigris` — used once to fetch Puerto Rico's coastline for the maps,
+which are drawn without it if the package or the network is unavailable.
 
 Bulk downloads go to `$PR_GAPS_DATA`, which defaults to the `data/` sibling of
 this repository (`C:\Users\camer\Projects\G-LIHT\data`). Override it to put them
@@ -238,6 +240,7 @@ G-LIHT/
     R/ingest/06_refine_chm.R       exact footprints from CHM valid-data extent
     R/inventory/04_repeat.R        epoch overlay, repeat tiles, campaign pairs
     R/inventory/07_report.R        summary tables and figures
+    R/inventory/08_basemap.R       Puerto Rico coastline for the maps
     derived/inventory/             committed outputs (CSV, GPKG, figures)
     docs/plan.md                   the 13-week plan
     docs/decisions/                ADRs, one per decision
@@ -245,6 +248,7 @@ G-LIHT/
     cache/index/                   directory listings
     raw/gliht/                     downloaded products + MANIFEST.csv
     interim/tile_shapefiles/       tile shapefiles, unpacked — regenerable
+    interim/boundary/              Puerto Rico coastline — regenerable
     runs/                          per-run outputs (Appendix A.2)
 ```
 

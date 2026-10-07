@@ -34,7 +34,7 @@ Determined by the GL_PRODUCTS argument in 05_download.R
    - *tiles.shp: coverage tiles
 - lidar/las
    - *.las: point cloud files
-- trajectory/shp
+- (NOT INCLUDED) trajectory/shp
    - *gnd-trajectory.shp: flight trajectory
 - metadata
    - *metadata.pdf: flight metadata
