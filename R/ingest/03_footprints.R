@@ -171,12 +171,12 @@ gl_step_footprints <- function(campaigns, files) {
 
   ## Fetch and read every campaign's polygons. A campaign that fails warns and
   ## is skipped rather than ending the run.
+  gl_msg(sprintf("reading tile shapefiles for %d campaigns", length(to_build)))
+
   tile_list <- vector("list", length(to_build))
   for (i in seq_along(to_build)) {
-    if (i %% 20 == 1) {
-      gl_msg(sprintf("footprints %d/%d: %s", i, length(to_build), to_build[i]))
-    }
     tile_list[[i]] <- gl_try(gl_campaign_tiles(to_build[i], files), to_build[i])
+    gl_progress(i, length(to_build))
   }
   tiles <- gl_stack(tile_list)
   if (is.null(tiles)) stop("no tile shapefiles could be read for any campaign")

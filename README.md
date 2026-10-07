@@ -146,9 +146,20 @@ unambiguous.
 | `tiles_shp` | `lidar/shp/` | tile footprint shapefiles |
 
 `GL_DEFAULT_PRODUCTS` in `R/ingest/00_config.R` sets what a bare
-`gl_plan_download()` asks for: `chm`, `chm_rugosity`, `dtm`, `slope`, `aspect`,
-`pulse_density`, `metadata`. Add `"height_pct"` and `"density_dec"` there when
-you want the 26 m metric stacks.
+`gl_plan_download()` asks for: `chm`, `dtm`, `slope`, `aspect`, `pulse_density`,
+`las`, `metadata`. Add `"chm_rugosity"`, `"height_pct"` or `"density_dec"` there
+when you want them.
+
+**`las` dominates the total.** The point clouds are roughly an order of
+magnitude larger than every raster product combined, so read the dry-run
+breakdown before committing, and drop `"las"` from the list for a rasters-only
+pass.
+
+**`chm_rugosity` is out of the default** because the server publishes it for
+only 18 of the 241 campaigns carrying 2017 x 2018 overlap, so it would be
+absent from almost every comparison it was meant to support. It is a windowed
+standard deviation of the CHM, so it can be recomputed from the CHM for
+whichever campaigns need it.
 
 **`dsm` is deliberately out of the default**, and reconstructable rather than
 worth fetching: `DSM − (CHM + DTM)` is 0.0000 m everywhere, verified on

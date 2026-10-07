@@ -11,6 +11,28 @@
 ## tell a slow step from a stalled one.
 gl_msg <- function(...) cat(format(Sys.time(), "%H:%M:%S"), "|", ..., "\n")
 
+## Print a one-line percentage ticker from inside a loop: "10% ... 20% ... 100%".
+## Call it once per iteration with the iteration number and the total.
+##
+## WHY a percentage rather than the campaign name: the crawl and the footprint
+## builder both run for several minutes over ~300 campaigns, and naming every
+## twentieth one filled the console with identifiers nobody reads while still
+## giving no sense of how far through the run was. A percentage answers the only
+## question being asked ("how much longer?") in one line instead of fifteen.
+gl_progress <- function(i, n, step = 10) {
+  if (n < 1) return(invisible(NULL))
+
+  ## Print only when this iteration crosses a 10% boundary, so the line grows
+  ## once per step no matter how many iterations there are.
+  reached <- floor(100 * i / n / step) * step
+  previous <- floor(100 * (i - 1) / n / step) * step
+  if (reached <= previous || reached == 0) return(invisible(NULL))
+
+  cat(if (reached < 100) sprintf("%d%% ... ", reached) else "100%\n")
+  utils::flush.console()
+  invisible(NULL)
+}
+
 ## Area of each polygon, in hectares.
 ## WHY: sf reports area as a "units" object in square metres, but every result
 ## in this project is quoted in hectares. Converting in one place keeps the

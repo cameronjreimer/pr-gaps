@@ -5,6 +5,10 @@
 ##   derived/inventory/pr_inventory_by_epoch.csv
 ##   derived/inventory/figures/pr_coverage_by_epoch.png
 ##   derived/inventory/figures/pr_repeat_coverage.png
+##
+## The campaign-by-campaign overlap table is deliberately not printed here.
+## Step 3 already writes every pair to pr_repeat_campaign_pairs.csv, which is
+## easier to read than fifteen truncated rows scrolling past in a console.
 ## ---------------------------------------------------------------------------
 
 ## One row summarising a single epoch. `rows` is that epoch's slice of the
@@ -165,8 +169,7 @@ gl_plot_repeat_map <- function(epoch_cov, rep_cov, path, boundary = NULL) {
 }
 
 ## Run step 6.
-gl_step_report <- function(footprints, epoch_cov, rep_cov, pairs,
-                           drop_mosaics = TRUE) {
+gl_step_report <- function(footprints, epoch_cov, rep_cov, drop_mosaics = TRUE) {
   paths <- gl_init_dirs()
 
   by_epoch <- gl_inventory_by_epoch(footprints, drop_mosaics)
@@ -186,13 +189,6 @@ gl_step_report <- function(footprints, epoch_cov, rep_cov, pairs,
                                    boundary)
   figures <- c(epoch_map, repeat_map)
   gl_msg("figures written: ", paste(basename(figures), collapse = ", "))
-
-  if (!is.null(pairs)) {
-    gl_msg("largest campaign-level overlaps:")
-    biggest <- utils::head(pairs, 15)
-    print(biggest[, c("campaign_a", "campaign_b", "overlap_ha",
-                      "frac_a", "frac_b", "days_between")])
-  }
 
   invisible(list(inventory = by_epoch, figures = figures))
 }

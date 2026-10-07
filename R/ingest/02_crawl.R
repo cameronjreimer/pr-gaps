@@ -109,13 +109,12 @@ gl_crawl_campaign <- function(campaign, refresh = FALSE) {
 ## restart picks up roughly where it left off rather than re-fetching everything.
 gl_crawl_all <- function(campaigns, refresh = FALSE, max_campaigns = Inf) {
   names_to_crawl <- head(campaigns$campaign, max_campaigns)
+  gl_msg(sprintf("crawling %d campaigns", length(names_to_crawl)))
+
   crawled <- vector("list", length(names_to_crawl))
   for (i in seq_along(names_to_crawl)) {
-    if (i %% 20 == 1) {
-      gl_msg(sprintf("crawling campaign %d/%d: %s",
-                     i, length(names_to_crawl), names_to_crawl[i]))
-    }
     crawled[[i]] <- gl_crawl_campaign(names_to_crawl[i], refresh = refresh)
+    gl_progress(i, length(names_to_crawl))
   }
   gl_stack(crawled)
 }

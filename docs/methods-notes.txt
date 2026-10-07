@@ -1,8 +1,6 @@
 # Methods Notes
 
 # To-Do
-- METRICS FILES NOT INCLUDED IN INVENTORY STEP AND pr_files.csv OUTPUT
-- Structure the crawl step to either find ALL files, or specify a list that includes metrics
 - Update repeat coverage map to show WHICH epochs are shared for each polygon
 - Don't print 'largest campaign-level overlaps'
 - Change crawl and footprints msgs to 10% . . . 20% . . . etc.
@@ -15,7 +13,7 @@ Determined by the GL_PRODUCTS argument in 05_download.R
 
 - lidar/geotiff
    - chm: canopy height model
-   - chm_rugosity: local height variation 
+   - (NOT INCLUDED)chm_rugosity: local height variation - few campaigns actually have this available
    - dtm: digital terrain model (bare earth)
    - (NOT INCLUDED) dsm: digital surface model (top-of-surface)
    - (NOT INCLUDED): CHM_mean
@@ -43,6 +41,12 @@ Determined by the GL_PRODUCTS argument in 05_download.R
 
 # 1. List Files (pr_files + pr_campaigns)
 
+  ## Specifying which metrics to keep ahead of time 
+  Cleans up download list and makes organization easier
+
+  ## Not including trajectories 
+  These are split up by flight day, not by campaign, so they're not unique. They're also just not very useful, so not worth messing with.
+
 # 2. Get Coverage foot prints (pr_footprints + pr_footprint_summary)
 
   ## .las tiling scheme
@@ -55,9 +59,6 @@ Determined by the GL_PRODUCTS argument in 05_download.R
   ## Handling mosaics
   A few campaigns (*EV[0-9]_all) are mosaics of a bunch of other flights over the same epoch. These need to be handled
   differently or filtered out, so the is_mosaic column is a flag for this. 
-
-  ## Not including trajectories 
-  These are split up by flight day, not by campaign, so they're not unique. They're also just not very useful, so not worth messing with. 
 
 # 3. Get Repeat Coverage (pr_inventory_by_epoch + pr_repeat_coverage + pr_repeat_summary + pr_repeat_tiles + pr_repeat_pairs)
 

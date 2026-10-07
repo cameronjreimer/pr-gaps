@@ -85,8 +85,7 @@ if ("--reuse" %in% args && file.exists(fp_gpkg)) {
 rep <- gl_step_repeat(fps$tiles, fps$footprints)
 
 ## --- Step 4: tables and figures --------------------------------------------
-gl_step_report(fps$footprints, rep$epoch_coverage, rep$repeat_coverage,
-               rep$campaign_pairs)
+gl_step_report(fps$footprints, rep$epoch_coverage, rep$repeat_coverage)
 
 ## --- Step 5: what a download would cost ------------------------------------
 ## The 2017 -> 2018 (Hurricane Maria) interval is the chapter's core, so the

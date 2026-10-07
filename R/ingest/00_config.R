@@ -122,15 +122,24 @@ CAMPAIGN_SUBDIRS <- c(
 ## The products a plain `gl_plan_download()` asks for — see GL_PRODUCTS in
 ## 05_download.R for the full list of names.
 ##
-## CHM and chm_rugosity are canopy structure with terrain removed; DTM, slope
-## and aspect are the terrain covariates (the DSM is deliberately absent, since
-## DSM = CHM + DTM exactly and is reconstructable); pulse_density is the
-## nuisance variable for the point-density confound in §4 of the plan.
+## CHM is canopy structure with terrain removed; DTM, slope and aspect are the
+## terrain covariates (the DSM is deliberately absent, since DSM = CHM + DTM
+## exactly and is reconstructable); pulse_density is the nuisance variable for
+## the point-density confound in §4 of the plan.
 ##
-## The height percentiles and density deciles are listed but not enabled: add
-## "height_pct" and "density_dec" here when you want them.
-GL_DEFAULT_PRODUCTS <- c("chm", "chm_rugosity", "dtm", "slope", "aspect",
-                         "pulse_density", "metadata")
+## The raw point clouds are included: the gap work needs returns, not just the
+## gridded surfaces. They dominate the download — LAS is roughly ten times the
+## size of every raster product put together — so check the dry-run size before
+## committing, and drop "las" from this list for a rasters-only pass.
+##
+## Three products are defined but not enabled. chm_rugosity is published for
+## only 18 of the 241 campaigns in the 2017 x 2018 overlap, so asking for it
+## buys a layer that is missing almost everywhere it would be compared; it is
+## also derivable from the CHM. The height percentiles and density deciles are
+## the 26 m metric stacks. Add "chm_rugosity", "height_pct" or "density_dec"
+## here when you want them.
+GL_DEFAULT_PRODUCTS <- c("chm", "dtm", "slope", "aspect",
+                         "pulse_density", "las", "metadata")
 
 ## HTTP politeness / robustness.
 HTTP_RETRIES <- 3L
