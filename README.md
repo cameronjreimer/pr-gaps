@@ -120,17 +120,47 @@ state <- readRDS("derived/inventory/pr_gliht_state.rds")
 maria <- gl_repeat_campaigns(state$repeat_coverage$campaign_pairs,
                              "2017_pre", "2018_post", min_overlap_ha = 25)
 
-plan <- gl_plan_download(state$inventory$files, maria,
-                         products = c("chm", "dtm", "metadata"))
+plan <- gl_plan_download(state$inventory$files, maria)   # GL_DEFAULT_PRODUCTS
 gl_run_download(plan, dry_run = TRUE)    # prints size by product
 gl_run_download(plan, dry_run = FALSE)   # fetches
 ```
 
-Products available: `chm`, `dtm`, `dsm`, `slope`, `las`, `metrics`, `metadata`,
-`tiles_shp`. Downloads are restartable at file granularity — a file
-already present at the published size is skipped, and every transfer is written
-to `<name>.part` and renamed only on success, so an interrupted run never leaves
-a truncated file that looks complete.
+Each product is a directory plus a filename pattern, because several names
+repeat across directories with different meanings — `_aspect` matches both the
+1 m terrain aspect and the 26 m `ground_aspect` in `metrics/`, and `chm_mean`
+exists at both resolutions. Scoping by directory keeps each product
+unambiguous.
+
+| Product | Directory | What it is |
+|---|---|---|
+| `chm` | `lidar/geotiff/` | 1 m maximum canopy height (m AGL) |
+| `chm_rugosity` | `lidar/geotiff/` | 1 m sd of canopy height over a 1/24-acre window |
+| `dtm` | `lidar/geotiff/` | 1 m bare-earth elevation (m, EGM96 geoid) |
+| `slope`, `aspect` | `lidar/geotiff/` | 1 m terrain derivatives |
+| `dsm` | `lidar/geotiff/` | 1 m top-of-surface — **redundant**, see below |
+| `pulse_density` | `lidar/geotiff/metrics/` | 26 m pulse density |
+| `height_pct` | `lidar/geotiff/metrics/` | 26 m `all_p10`…`all_p100` height percentiles |
+| `density_dec` | `lidar/geotiff/metrics/` | 26 m `all_d0`…`all_d9` return proportions per height decile |
+| `las` | `lidar/las/` | point clouds — by far the largest |
+| `metadata` | `metadata/` | per-campaign PDF: altitude AGL, scan angle, dates |
+| `tiles_shp` | `lidar/shp/` | tile footprint shapefiles |
+
+`GL_DEFAULT_PRODUCTS` in `R/ingest/00_config.R` sets what a bare
+`gl_plan_download()` asks for: `chm`, `chm_rugosity`, `dtm`, `slope`, `aspect`,
+`pulse_density`, `metadata`. Add `"height_pct"` and `"density_dec"` there when
+you want the 26 m metric stacks.
+
+**`dsm` is deliberately out of the default**, and reconstructable rather than
+worth fetching: `DSM − (CHM + DTM)` is 0.0000 m everywhere, verified on
+`PR_15March2017_EV1` across 2.57 M cells with an identical valid-data mask. It
+also mixes canopy and terrain into one number, so for structural heterogeneity
+prefer `chm_rugosity` over `dsm_rugosity` — the latter measures terrain
+roughness as much as canopy roughness on sloping ground.
+
+Downloads are restartable at file granularity — a file already present at the
+published size is skipped, and every transfer is written to `<name>.part` and
+renamed only on success, so an interrupted run never leaves a truncated file
+that looks complete.
 
 ## How coverage is determined, and what that costs you
 

@@ -115,8 +115,22 @@ CAMPAIGN_SUBDIRS <- c(
   "lidar/shp/",
   "lidar/shp/tiles/",
   "lidar/geotiff/",
+  "lidar/geotiff/metrics/",
   "metadata/"
 )
+
+## The products a plain `gl_plan_download()` asks for — see GL_PRODUCTS in
+## 05_download.R for the full list of names.
+##
+## CHM and chm_rugosity are canopy structure with terrain removed; DTM, slope
+## and aspect are the terrain covariates (the DSM is deliberately absent, since
+## DSM = CHM + DTM exactly and is reconstructable); pulse_density is the
+## nuisance variable for the point-density confound in §4 of the plan.
+##
+## The height percentiles and density deciles are listed but not enabled: add
+## "height_pct" and "density_dec" here when you want them.
+GL_DEFAULT_PRODUCTS <- c("chm", "chm_rugosity", "dtm", "slope", "aspect",
+                         "pulse_density", "metadata")
 
 ## HTTP politeness / robustness.
 HTTP_RETRIES <- 3L

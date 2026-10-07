@@ -94,7 +94,7 @@ gl_step_report(fps$footprints, rep$epoch_coverage, rep$repeat_coverage,
 maria <- gl_repeat_campaigns(rep$campaign_pairs, "2017_pre", "2018_post",
                              min_overlap_ha = 25)
 gl_msg(sprintf("%d campaigns carry >=25 ha of 2017 x 2018 overlap", length(maria)))
-plan <- gl_plan_download(inv$files, maria, products = c("chm", "dtm", "metadata"))
+plan <- gl_plan_download(inv$files, maria)      # GL_DEFAULT_PRODUCTS, see 00_config.R
 gl_run_download(plan, dry_run = TRUE)
 
 ## --- Step 6 (opt-in): exact footprints from the CHM ------------------------

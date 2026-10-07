@@ -12,42 +12,82 @@
 ## is what makes the raw data re-obtainable without this code (plan, A.2).
 ## ---------------------------------------------------------------------------
 
-## The products you can ask for, as patterns matching the published file names.
+## The products you can ask for. Each is a directory plus a filename pattern.
 ##
-## Two packagings are in use across campaigns and both have to be matched: a
-## single mosaic GeoTIFF (<campaign>_CHM.tif.gz) and a tar of per-strip GeoTIFFs
-## (<campaign>_CHM.tar.gz).
+## WHY the directory is part of the definition rather than just the pattern:
+## several names repeat across directories with different meanings. `_aspect`
+## alone matches both <campaign>_aspect.tif.gz (1 m, from the DTM) and
+## <campaign>_ground_aspect.tif.gz (26 m, in metrics/); `_chm_mean` likewise
+## exists at both resolutions. Scoping by directory makes each product
+## unambiguous instead of relying on ever-more-baroque regexes.
+##
+## Two packagings are in use and both have to be matched: a single mosaic
+## GeoTIFF (<campaign>_CHM.tif.gz) and a tar of per-strip GeoTIFFs
+## (<campaign>_CHM.tar.gz). Which one a campaign uses follows its LAS scheme.
 GL_PRODUCTS <- list(
-  chm       = "_CHM[.](tif|tar)[.]gz$",     # canopy height model
-  dtm       = "_DTM[.](tif|tar)[.]gz$",     # bare-earth terrain
-  dsm       = "_DSM[.](tif|tar)[.]gz$",     # top-of-surface
-  slope     = "_slope[.](tif|tar)[.]gz$",
-  las       = "[.]las[.]gz$",               # the point clouds; by far the largest
-  metrics   = "^.*_all_(p[0-9]+|mean|qmean|kurt|d[0-9])[.]tif[.]gz$",
-  metadata  = "_metadata[.]pdf$",           # flight altitude, scan angle, dates
-  tiles_shp = "_tiles([.]zip|[.]shp|[.]shx|[.]dbf|[.]prj|_shp[.]tar[.]gz)$"
+  ## --- lidar/geotiff/ : 1 m surfaces -------------------------------------
+  chm          = list(subdir  = "lidar/geotiff/",
+                      pattern = "_CHM[.](tif|tar)[.]gz$"),
+  chm_rugosity = list(subdir  = "lidar/geotiff/",
+                      pattern = "_chm_rugosity[.](tif|tar)[.]gz$"),
+  dtm          = list(subdir  = "lidar/geotiff/",
+                      pattern = "_DTM[.](tif|tar)[.]gz$"),
+  slope        = list(subdir  = "lidar/geotiff/",
+                      pattern = "_slope[.](tif|tar)[.]gz$"),
+  aspect       = list(subdir  = "lidar/geotiff/",
+                      pattern = "_aspect[.](tif|tar)[.]gz$"),
+  ## DSM is omitted on purpose: DSM = CHM + DTM exactly (verified to 0.0000 m),
+  ## so it is reconstructable from two products you already keep.
+  dsm          = list(subdir  = "lidar/geotiff/",
+                      pattern = "_DSM[.](tif|tar)[.]gz$"),
+
+  ## --- lidar/geotiff/metrics/ : 26 m return statistics -------------------
+  ## pulse_density is the nuisance variable for the point-density confound.
+  pulse_density = list(subdir  = "lidar/geotiff/metrics/",
+                       pattern = "_pulse_density[.](tif|tar)[.]gz$"),
+  ## Height percentiles p10..p100 and density deciles d0..d9, all-returns
+  ## stratum. The tree_, shrub_ and nmbu_tree_ strata are not included here.
+  height_pct    = list(subdir  = "lidar/geotiff/metrics/",
+                       pattern = "_all_p[0-9]+[.](tif|tar)[.]gz$"),
+  density_dec   = list(subdir  = "lidar/geotiff/metrics/",
+                       pattern = "_all_d[0-9]+[.](tif|tar)[.]gz$"),
+
+  ## --- everything else ---------------------------------------------------
+  las       = list(subdir  = "lidar/las/",
+                   pattern = "[.]las[.]gz$"),        # by far the largest
+  metadata  = list(subdir  = "metadata/",
+                   pattern = "_metadata[.]pdf$"),    # altitude, scan angle, dates
+  tiles_shp = list(subdir  = c("lidar/shp/", "lidar/shp/tiles/"),
+                   pattern = "_tiles([.]zip|[.]shp|[.]shx|[.]dbf|[.]prj|_shp[.]tar[.]gz)$")
 )
+
+## Which rows of `files` belong to one named product.
+gl_product_match <- function(files, product) {
+  spec <- GL_PRODUCTS[[product]]
+  files$subdir %in% spec$subdir & grepl(spec$pattern, files$name)
+}
 
 ## Work out which files a request comes to, and where each would be saved.
 ## Nothing is fetched here.
-gl_plan_download <- function(files, campaigns, products = c("chm", "dtm")) {
+gl_plan_download <- function(files, campaigns, products = GL_DEFAULT_PRODUCTS) {
   unknown <- setdiff(products, names(GL_PRODUCTS))
   if (length(unknown)) stop("unknown product(s): ", paste(unknown, collapse = ", "))
 
-  patterns <- unlist(GL_PRODUCTS[products], use.names = FALSE)
   wanted <- files[files$campaign %in% campaigns, , drop = FALSE]
-  wanted <- wanted[grepl(paste(patterns, collapse = "|"), wanted$name), , drop = FALSE]
+
+  keep <- rep(FALSE, nrow(wanted))
+  for (product in products) keep <- keep | gl_product_match(wanted, product)
+  wanted <- wanted[keep, , drop = FALSE]
   if (!nrow(wanted)) return(wanted)
 
   wanted$dest <- file.path(gl_paths()$products, wanted$campaign, wanted$subdir,
                            wanted$name)
 
   ## Label each file with the product it belongs to, for the size breakdown.
-  ## Assigning in reverse order means the first matching product wins, so a file
-  ## matching two patterns is reported under the earlier one.
+  ## Assigning in reverse order means the first matching product wins.
   wanted$product <- "other"
   for (product in rev(names(GL_PRODUCTS))) {
-    wanted$product[grepl(GL_PRODUCTS[[product]], wanted$name)] <- product
+    wanted$product[gl_product_match(wanted, product)] <- product
   }
 
   wanted[order(wanted$campaign, wanted$subdir, wanted$name), ]

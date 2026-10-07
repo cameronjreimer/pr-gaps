@@ -3,7 +3,6 @@
 # To-Do
 - METRICS FILES NOT INCLUDED IN INVENTORY STEP AND pr_files.csv OUTPUT
 - Structure the crawl step to either find ALL files, or specify a list that includes metrics
-- Add PR outline to coverage map
 - Update repeat coverage map to show WHICH epochs are shared for each polygon
 - Don't print 'largest campaign-level overlaps'
 - Change crawl and footprints msgs to 10% . . . 20% . . . etc.
@@ -16,20 +15,19 @@ Determined by the GL_PRODUCTS argument in 05_download.R
 
 - lidar/geotiff
    - chm: canopy height model
+   - chm_rugosity: local height variation 
    - dtm: digital terrain model (bare earth)
-   - dsm: digital surface model (top-of-surface)
-   - slope: slope
+   - (NOT INCLUDED) dsm: digital surface model (top-of-surface)
    - (NOT INCLUDED): CHM_mean
    - (NOT INCLUDED): CHM_rugosity
    - (NOT INCLUDED): DSM_mean
    - (NOT INCLUDED): DSM_rugosity
-   - (NOT INCLUDED): aspect
+   - aspect: aspect
+   - slope: slope
 - lidar/geotiff/metrics (note that these are for all points, not just trees) 
-   - p[0-9]: height percentiles	(10% increments) of all returns 
-   - d[0-9]: density deciles (10% increments) of all returns 
-   - mean: mean of all return heights
-   - qmean: quadratic mean of all return heights
-   - kurt: kurtosis of all return heights
+   - pulse_density: pulses per meter
+   - (NOT INCLUDED)p[0-9]: height percentiles (10% increments) of all returns 
+   - (NOT INCLUDED)d[0-9]: density deciles (10% increments) of all returns 
 - lidar/shp
    - *tiles.shp: coverage tiles
 - lidar/las
