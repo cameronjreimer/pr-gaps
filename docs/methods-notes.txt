@@ -1,13 +1,17 @@
 # Methods Notes
 
 # To-Do
-- should I keep just the mosaic geotiffs or the tiled ones? --> figure out later 
-- What minimum overlap should I use? 
+- 
+
+# Analysis Decisions
+- Minimum overlap between pairs
+- Use mosaic rasters or remake them on the fly from tiles 
 
 
 ## What files do we download? 
 
-Determined by the GL_PRODUCTS argument in 05_download.R
+Available files determined by the GL_PRODUCTS argument in 05_download.R
+Downloaded files determined by GL_DEFAULT_PRODUCTS in 00_config.R
 02_crawl.R just finds all available files
 
 - lidar/geotiff
@@ -68,6 +72,11 @@ Determined by the GL_PRODUCTS argument in 05_download.R
   ## Unpacking files
   Everything except for .las files are unpacked from their compressed format, then the compressed version is deleted.
   .las files might not need to be unpacked depending on the package we use to process lidar data. 
+
+  ## Minimum overlap between campaigns
+  Only keep campaign pairs (pre- and post-Maria) with at least 25ha of overlap. This potentially filters out pairs where the overlap is just 
+  from adjacent tile edges (with maybe no real shared data).
+  - Analysis might be restricted to pairs with a larger overlap to make sure there's enough gaps. 
 
 # 6. Exact footprint with CHMs
 
