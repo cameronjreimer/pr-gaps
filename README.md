@@ -181,7 +181,27 @@ roughness as much as canopy roughness on sloping ground.
 Downloads are restartable at file granularity — a file we already hold is
 skipped, and every transfer is written to `<name>.part` and renamed only on
 success, so an interrupted run never leaves a truncated file that looks
-complete.
+complete. The manifest is written after each campaign, so a killed run loses at
+most one campaign's rows; a file that fails to download is reported at the end
+rather than stopping the run, and a transfer stalled below 1 KB/s for two
+minutes is aborted and retried.
+
+### Downloading on a cluster
+
+`scripts/02_download.R` is the download step on its own. It needs only `curl`
+and `jsonlite` (no `sf`/`terra`/GDAL), reads the plan from
+`derived/inventory/pr_gliht_state.rds` (gitignored, so copy it over), refuses to
+run unless `PR_GAPS_DATA` is set, and exits non-zero if any file failed:
+
+```bash
+export PR_GAPS_DATA=/path/to/project/pr_gaps_data
+Rscript scripts/02_download.R --download 2                     # smoke test
+Rscript scripts/02_download.R --download all --products chm,dtm,slope,aspect,pulse_density,metadata --prune-mosaics
+Rscript scripts/02_download.R --download all --products las
+```
+
+Re-submit the same command after a wall-time kill; only what is missing is
+fetched. Run one copy at a time per data root.
 
 ### Unpacking, and what that costs
 

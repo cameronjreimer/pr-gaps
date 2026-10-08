@@ -267,8 +267,9 @@ gl_append_manifest <- function(rows) {
 ##
 ## Defaults to a dry run, which prints the size and fetches nothing — call it
 ## again with dry_run = FALSE to transfer. The transfer is restartable: files we
-## already hold are skipped (see gl_download), so re-running after an
-## interruption picks up the remainder.
+## already hold are skipped (see gl_have_file), so re-running after an
+## interruption picks up the remainder. Returns, invisibly, the plan rows that
+## failed to download — empty when everything arrived.
 ##
 ## `unpack` names the products whose archives are extracted and then deleted —
 ## see GL_UNPACK_PRODUCTS in 00_config.R for what that costs in disk. Pass
@@ -291,41 +292,80 @@ gl_run_download <- function(plan, dry_run = TRUE, verify_md5 = TRUE,
   }
 
   ## Fetch each file, unpack it if it is one of the archived products, and
-  ## describe what arrived. The manifest is written once at the end rather than
-  ## per file, so a long plan does not rewrite the CSV hundreds of times.
-  records <- vector("list", nrow(plan))
+  ## describe what arrived.
+  ##
+  ## WHY the manifest is flushed at every campaign boundary: written once at the
+  ## end, a job killed at its wall time lost every row from that run — and for
+  ## unpacked rasters the archive is already gone, so its size and checksum
+  ## could never be recovered. Per file would rewrite the CSV thousands of
+  ## times; per campaign is ~240 rewrites and loses at most one campaign's rows.
+  ##
+  ## WHY a failed file does not stop the run: on a multi-hour transfer a brief
+  ## server outage is likely, and the next run fetches whatever is missing. The
+  ## failures are reported at the end and returned.
+  plan <- plan[order(plan$campaign), , drop = FALSE]
+  records <- list()
+  failed <- rep(FALSE, nrow(plan))
+  n_fetched <- 0L
   n_unpacked <- 0L
   n_pruned <- 0L
   for (i in seq_len(nrow(plan))) {
-    gl_msg(sprintf("[%d/%d] %s", i, nrow(plan), plan$name[i]))
-    gl_download(plan$url[i], plan$dest[i], plan$size_bytes[i])
+    ## Files we already hold are skipped without re-hashing them: their row is
+    ## already in the manifest, and re-reading ~500 GB of LAS on every restart
+    ## is what this avoids. The one exception is an archive that was fetched but
+    ## never unpacked (a run killed between the two), which is finished here.
+    held <- gl_have_file(plan$dest[i], plan$size_bytes[i])
+    needs_unpack <- plan$product[i] %in% unpack && file.exists(plan$dest[i])
 
-    ## A file we already held in unpacked form has no archive to measure, and
-    ## its original row is already in the manifest — leave that row alone.
-    if (!file.exists(plan$dest[i])) next
-
-    row <- gl_manifest_row(plan$campaign[i], plan$name[i], plan$url[i],
-                           plan$dest[i], plan$modified[i], verify_md5)
-
-    if (plan$product[i] %in% unpack) {
-      row$unpacked_to <- gl_unpack_archive(plan$dest[i])
-      if (!is.na(row$unpacked_to)) {
-        n_unpacked <- n_unpacked + 1L
-        if (prune_mosaics) {
-          n_pruned <- n_pruned + gl_prune_mosaics(row$unpacked_to,
-                                                  dry_run = FALSE)[["files"]]
-        }
-      }
+    if (!held || needs_unpack) {
+      gl_msg(sprintf("[%d/%d] %s", i, nrow(plan), plan$name[i]))
+      ok <- !is.null(gl_try(gl_download(plan$url[i], plan$dest[i],
+                                        plan$size_bytes[i]), plan$name[i]))
+      failed[i] <- !ok
+      if (ok) records[[length(records) + 1]] <- gl_fetch_record(
+        plan[i, ], verify_md5, unpack, prune_mosaics)
     }
-    records[[i]] <- row
+
+    last_of_campaign <- i == nrow(plan) || plan$campaign[i + 1] != plan$campaign[i]
+    if (last_of_campaign && length(records)) {
+      for (r in records) {
+        n_fetched <- n_fetched + 1L
+        n_unpacked <- n_unpacked + !is.na(r$unpacked_to)
+        n_pruned <- n_pruned + attr(r, "n_pruned")
+      }
+      gl_append_manifest(gl_stack(records))
+      records <- list()
+    }
   }
 
-  manifest_path <- gl_append_manifest(gl_stack(records))
-  gl_msg(sprintf("downloaded %d files (%d unpacked%s); manifest: %s",
-                 nrow(plan), n_unpacked,
+  gl_msg(sprintf("fetched %d files (%d unpacked%s), %d already held, %d failed",
+                 n_fetched, n_unpacked,
                  if (n_pruned) sprintf(", %d mosaics pruned", n_pruned) else "",
-                 manifest_path))
-  invisible(manifest_path)
+                 nrow(plan) - n_fetched - sum(failed), sum(failed)))
+  if (any(failed)) {
+    gl_msg("failed — re-run to retry these:")
+    for (u in plan$url[failed]) cat("   ", u, "\n")
+  }
+  invisible(plan[failed, , drop = FALSE])
+}
+
+## Describe one freshly fetched file and unpack it if it is an archived product.
+## Returns its manifest row, with the number of mosaics pruned as an attribute.
+##
+## The row has to be built before unpacking, while the archive is still on disk,
+## because its size and checksum cannot be recovered once it has been deleted.
+gl_fetch_record <- function(item, verify_md5, unpack, prune_mosaics) {
+  row <- gl_manifest_row(item$campaign, item$name, item$url, item$dest,
+                         item$modified, verify_md5)
+  n_pruned <- 0
+  if (item$product %in% unpack) {
+    row$unpacked_to <- gl_unpack_archive(item$dest)
+    if (!is.na(row$unpacked_to) && prune_mosaics) {
+      n_pruned <- gl_prune_mosaics(row$unpacked_to, dry_run = FALSE)[["files"]]
+    }
+  }
+  attr(row, "n_pruned") <- n_pruned
+  row
 }
 
 ## The campaigns holding repeat coverage between two epochs — the usual input to

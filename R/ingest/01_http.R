@@ -254,7 +254,11 @@ gl_download <- function(u, dest, approx_bytes = NA_real_, retries = HTTP_RETRIES
 
   ## timeout = 0 means "no overall time limit", because a single LAS file can be
   ## 500 MB; the connect timeout still catches a server that is simply not there.
+  ## The low-speed pair aborts a transfer that has stalled (under 1 KB/s for two
+  ## minutes) — without it a hung connection would sit until the job's wall time
+  ## ran out, and the abort counts as a failed attempt so it is retried.
   handle <- curl::new_handle(timeout = 0L, connecttimeout = 60L,
+                             low_speed_limit = 1024L, low_speed_time = 120L,
                              followlocation = TRUE)
 
   for (attempt in seq_len(retries)) {

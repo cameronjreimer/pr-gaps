@@ -1,7 +1,8 @@
 # Methods Notes
 
 # To-Do
-- should I keep just the mosaic geotiffs or the tiled ones? 
+- should I keep just the mosaic geotiffs or the tiled ones? --> figure out later 
+- What minimum overlap should I use? 
 
 
 ## What files do we download? 
