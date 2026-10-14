@@ -84,6 +84,11 @@ COVAR_FILES <- rbind(
   covar_file("gap_landcover",
              paste0(sb_file, "__disk__da%2Fa9%2Fcf%2Fdaa9cfb5af0e5f616f1865973d855d0245368660"),
              "puertorico_gap_landcover2000.tif"),
+  ## The .aux sidecar holds the class names (a raster attribute table); without
+  ## it the GeoTIFF is bare integers. Keep it next to the .tif, same stem.
+  covar_file("gap_landcover",
+             paste0(sb_file, "__disk__0d%2F95%2F50%2F0d9550c0b042eba7a9039f9b74c2845a06dbad27"),
+             "puertorico_gap_landcover2000.aux"),
 
   ## Holdridge life zones (geodatabase in a zip).
   covar_file("holdridge",
