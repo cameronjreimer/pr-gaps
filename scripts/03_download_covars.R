@@ -9,8 +9,11 @@
 ## Not fetched, because the plan puts them elsewhere:
 ##   * 2017 G-LiHT dtm / slope / aspect / chm — already in GL_DEFAULT_PRODUCTS,
 ##     fetched by 02_download.R;
-##   * C-CAP 2010 high-resolution — manual export from the Digital Coast Data
-##     Viewer (ID 6247). The 30 m product below is the scripted one.
+##
+## Manual layers (transport = manual in docs/covariate-registry.csv) are not
+## downloaded. Put the files in raw/covariates/<layer>/ by hand — currently
+## ccap_high_res, a Digital Coast Data Viewer export (ID 6247) — and --download
+## (or --register) checksums them into the manifest.
 ##
 ## Usage:
 ##   Rscript scripts/03_download_covars.R                 # dry run: lists files
@@ -113,10 +116,10 @@ COVAR_FILES$citation_key <- REGISTRY$citation_key[match(COVAR_FILES$layer,
 layers <- get_arg("--layers", "")
 if (nzchar(layers)) {
   wanted <- strsplit(layers, ",", fixed = TRUE)[[1]]
-  unknown <- setdiff(wanted, COVAR_FILES$layer)
+  unknown <- setdiff(wanted, REGISTRY$layer)
   if (length(unknown)) {
     stop("unknown layer(s): ", paste(unknown, collapse = ", "),
-         " (choose from ", paste(unique(COVAR_FILES$layer), collapse = ", "), ")")
+         " (choose from ", paste(REGISTRY$layer, collapse = ", "), ")")
   }
   COVAR_FILES <- COVAR_FILES[COVAR_FILES$layer %in% wanted, ]
 }
@@ -129,7 +132,8 @@ gl_msg(sprintf("%d files across %d layers", nrow(COVAR_FILES),
                length(unique(COVAR_FILES$layer))))
 do_download  <- "--download" %in% args
 do_reproject <- "--reproject" %in% args
-if (!do_download && !do_reproject) {
+do_register  <- do_download || "--register" %in% args
+if (!do_download && !do_reproject && !do_register) {
   print(COVAR_FILES[, c("layer", "name")], row.names = FALSE)
   gl_msg("dry run — add --download to fetch, --reproject to harmonize")
   quit(status = 0)
@@ -169,6 +173,42 @@ if (do_download) {
   for (u in failed) cat("   ", u, "\n")
 }
 
+## --- Register manual layers --------------------------------------------------
+## Files put in place by hand get the same manifest rows as downloaded ones. The
+## manifest is keyed on `url`, and every file of a manual layer shares one
+## landing page, so the file name is appended as a fragment to keep rows apart.
+## Files already in the manifest are not re-hashed.
+n_registered <- 0L
+if (do_register) {
+  manual <- REGISTRY[REGISTRY$transport == "manual", , drop = FALSE]
+  if (nzchar(layers)) manual <- manual[manual$layer %in% strsplit(layers, ",")[[1]], ]
+  known <- if (file.exists(COVAR_MANIFEST)) {
+    utils::read.csv(COVAR_MANIFEST, stringsAsFactors = FALSE)$dest
+  } else character(0)
+
+  for (i in seq_len(nrow(manual))) {
+    layer_dir <- file.path(gl_data_root(), "raw", "covariates", manual$layer[i])
+    files <- list.files(layer_dir, recursive = TRUE)
+    if (!length(files)) {
+      gl_msg("manual layer ", manual$layer[i], ": nothing in ", layer_dir)
+      next
+    }
+    files <- files[!file.path(layer_dir, files) %in% known]
+    rows <- lapply(files, function(name) {
+      row <- gl_manifest_row(manual$layer[i], name,
+                             paste0(manual$url[i], "#", name),
+                             file.path(layer_dir, name))
+      names(row)[names(row) == "campaign"] <- "layer"
+      row$citation_key <- manual$citation_key[i]
+      row[, c("layer", "name", "url", "dest", "bytes", "md5", "downloaded_utc",
+              "citation_key")]
+    })
+    gl_append_manifest(gl_stack(rows), manifest_path = COVAR_MANIFEST)
+    n_registered <- n_registered + length(files)
+  }
+  gl_msg(sprintf("registered %d manual files", n_registered))
+}
+
 ## --- Harmonize -------------------------------------------------------------
 ## covariates-plan.md, "Harmonization": a copy of every layer in EPSG:32161 at
 ## roughly its native cell size, under interim/covariates/. raw/ is untouched.
@@ -176,7 +216,11 @@ if (do_download) {
 ##   vectors -> reprojected directly.
 ## Restartable: an output that already exists is skipped (delete it to redo).
 ##
-## Three things worth knowing:
+## Four things worth knowing:
+##   * The high-res C-CAP is four 2 m tiles in Conus Albers (EPSG:5070). They are
+##     mosaicked and projected as one raster on a fixed 2 m grid, so there are
+##     no seams or per-tile cell-size differences. Output is a single large
+##     file, ccap_high_res_mosaic_32161.tif.
 ##   * Hansen is a 10 x 10 degree granule, mostly open ocean. Projecting all of
 ##     it would be slow and pointless, so it is cropped to PR_BBOX first. The
 ##     crop happens only in this interim copy; raw/ stays whole.
@@ -188,20 +232,29 @@ if (do_download) {
 PR_BBOX <- c(xmin = -68.0, xmax = -65.0, ymin = 17.5, ymax = 18.8)  # lon/lat
 
 HARMONIZE <- data.frame(
-  layer  = c("hansen", "hansen", "hansen", "ccap", "gap_landcover",
-             "helmer_formations", "prism", "holdridge"),
+  layer  = c("hansen", "hansen", "hansen", "ccap", "ccap_high_res",
+             "gap_landcover", "helmer_formations", "prism", "holdridge"),
   ## regex on the path under raw/covariates/<layer>/
   find   = c("treecover2000.*[.]tif$", "lossyear.*[.]tif$", "datamask.*[.]tif$",
-             "[.]tif$", "[.]tif$", "PR_Land_Cover_TIFF/.*[.]tif$", "[.]asc$",
-             "[.]gdb$"),
-  method = c("bilinear", "near", "near", "near", "near", "near", "bilinear",
-             "vector"),
-  crop   = c(TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE),
+             "[.]tif$", "[.]tif$", "[.]tif$", "PR_Land_Cover_TIFF/.*[.]tif$",
+             "[.]asc$", "[.]gdb$"),
+  method = c("bilinear", "near", "near", "near", "near", "near", "near",
+             "bilinear", "vector"),
+  crop   = c(TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE),
+  ## TRUE: all matching files are mosaicked and projected as one raster.
+  mosaic = c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE),
+  ## Output cell size in metres; NA keeps terra's choice (about the native size).
+  ## The high-res tiles come in slightly different sizes once each is projected
+  ## alone, so the mosaic pins them to one 2 m grid.
+  res    = c(NA, NA, NA, NA, 2, NA, NA, NA, NA),
   stringsAsFactors = FALSE
 )
 
-gl_harmonize_raster <- function(src, dest, method, crop, crs_if_missing = "EPSG:4269") {
-  r <- terra::rast(src)
+## `src` is one file, or several to be mosaicked: terra::vrt() lays them on a
+## common grid without writing anything, and where tiles overlap the later one wins.
+gl_harmonize_raster <- function(src, dest, method, crop, res = NA,
+                                crs_if_missing = "EPSG:4269") {
+  r <- if (length(src) > 1) terra::vrt(src) else terra::rast(src)
   ## Read the type now: a cropped raster is in memory-virtual form and reports
   ## none. Categorical output keeps the source integer type; bilinear needs floats.
   datatype <- if (method == "near") terra::datatype(r) else "FLT4S"
@@ -211,9 +264,15 @@ gl_harmonize_raster <- function(src, dest, method, crop, crs_if_missing = "EPSG:
                           terra::crs(r))
     r <- terra::crop(r, terra::ext(box), snap = "out")
   }
-  terra::project(r, paste0("EPSG:", CRS_AREA), method = method, filename = dest,
-                 datatype = datatype, overwrite = TRUE,
-                 gdal = c("COMPRESS=DEFLATE", "TILED=YES"))
+  target <- paste0("EPSG:", CRS_AREA)
+  options <- c("COMPRESS=DEFLATE", "TILED=YES", "BIGTIFF=YES")
+  if (is.na(res)) {
+    terra::project(r, target, method = method, filename = dest,
+                   datatype = datatype, overwrite = TRUE, gdal = options)
+  } else {
+    terra::project(r, target, method = method, res = res, filename = dest,
+                   datatype = datatype, overwrite = TRUE, gdal = options)
+  }
   invisible(dest)
 }
 
@@ -249,20 +308,29 @@ if (do_reproject) {
 
     dir.create(file.path(interim_root, spec$layer), recursive = TRUE,
                showWarnings = FALSE)
-    for (src in sources) {
-      stem <- tools::file_path_sans_ext(basename(src))
+    ## One job per file, or a single job for the whole set when mosaicking.
+    jobs <- if (spec$mosaic) list(sources) else as.list(sources)
+    for (src in jobs) {
+      stem <- if (spec$mosaic) paste0(spec$layer, "_mosaic") else
+        tools::file_path_sans_ext(basename(src))
       dest <- file.path(interim_root, spec$layer, paste0(
         stem, "_32161", if (spec$method == "vector") ".gpkg" else ".tif"))
       if (file.exists(dest)) { gl_msg("held: ", basename(dest)); next }
 
-      gl_msg(sprintf("reproject [%s] %s", spec$method, basename(src)))
+      gl_msg(sprintf("reproject [%s] %s%s", spec$method, basename(src[1]),
+                     if (length(src) > 1) sprintf(" + %d more", length(src) - 1) else ""))
       partial <- paste0(dest, ".part")   # rename on success, as gl_download does
       partial <- sub("([.][^.]+)[.]part$", ".part\\1", partial)
       ok <- !is.null(gl_try(
         if (spec$method == "vector") gl_harmonize_vector(src, partial)
-        else gl_harmonize_raster(src, partial, spec$method, spec$crop),
-        basename(src)))
-      if (ok) file.rename(partial, dest) else {
+        else gl_harmonize_raster(src, partial, spec$method, spec$crop, spec$res),
+        basename(src[1])))
+      if (ok) {
+        file.rename(partial, dest)
+        ## GDAL may write a sidecar under the .part name; keep it with the output.
+        sidecar <- paste0(partial, ".aux.xml")
+        if (file.exists(sidecar)) file.rename(sidecar, paste0(dest, ".aux.xml"))
+      } else {
         unlink(partial)
         n_harmonize_failed <- n_harmonize_failed + 1L
       }
