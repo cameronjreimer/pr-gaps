@@ -1,0 +1,261 @@
+## ---------------------------------------------------------------------------
+## Puerto Rico gaps — download the scripted covariate layers.
+##
+## Fetches what docs/covariates-plan.md lists as "scripted" transport, into
+## $PR_GAPS_DATA/raw/covariates/<layer>/, and records each file in
+## raw/covariates/MANIFEST.csv (URL, size, md5, arrival time, citation key).
+## Nothing is clipped or reprojected here; harmonization is a later step.
+##
+## Not fetched, because the plan puts them elsewhere:
+##   * 2017 G-LiHT dtm / slope / aspect / chm — already in GL_DEFAULT_PRODUCTS,
+##     fetched by 02_download.R;
+##   * C-CAP 2010 high-resolution — manual export from the Digital Coast Data
+##     Viewer (ID 6247). The 30 m product below is the scripted one.
+##
+## Usage:
+##   Rscript scripts/03_download_covars.R                 # dry run: lists files
+##   Rscript scripts/03_download_covars.R --download      # fetch everything
+##   Rscript scripts/03_download_covars.R --download --layers hansen,prism
+##   Rscript scripts/03_download_covars.R --reproject     # raw/ -> interim/ EPSG:32161
+##   (flags combine: --download --reproject does both; reprojecting needs terra and sf)
+##
+## Restartable: files already present are skipped. Exits 1 if any file failed.
+## ---------------------------------------------------------------------------
+
+## --- Find the code (see 02_download.R) -------------------------------------
+file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+repo <- if (length(file_arg)) {
+  dirname(dirname(normalizePath(sub("^--file=", "", file_arg[1]),
+                                winslash = "/", mustWork = FALSE)))
+} else {
+  getwd()
+}
+options(pr_gaps.code_root = repo)
+for (f in sort(list.files(file.path(repo, "R", "ingest"), pattern = "[.]R$",
+                          full.names = TRUE))) {
+  source(f)
+}
+stopifnot(requireNamespace("curl", quietly = TRUE))
+
+args <- commandArgs(trailingOnly = TRUE)
+get_arg <- function(flag, default = NULL) {
+  i <- match(flag, args)
+  if (is.na(i) || i == length(args)) default else args[i + 1]
+}
+
+## --- What to fetch ---------------------------------------------------------
+## One row per file. `layer` is also the raw/covariates/ subdirectory.
+hansen_base <- paste0("https://storage.googleapis.com/earthenginepartners-hansen/",
+                      "GFC-2025-v1.13/Hansen_GFC-2025-v1.13_")
+prism_base  <- "https://prism.oregonstate.edu/normals_other/public/pr/grids/"
+sb_file     <- "https://www.sciencebase.gov/catalog/file/get/560c3b2de4b058f706e5411e?f="
+
+covar_file <- function(layer, url, name, citation_key, unpack = FALSE) {
+  data.frame(layer = layer, url = url, name = name,
+             citation_key = citation_key, unpack = unpack,
+             stringsAsFactors = FALSE)
+}
+
+prism_zip <- function(var) {
+  name <- sprintf("PRISM_%s_pr_1963-1995_normal_450mM1_annual_asc.zip", var)
+  covar_file("prism", paste0(prism_base, var, "/", name), name,
+             "prism_pr_1963_1995", unpack = TRUE)
+}
+
+COVAR_FILES <- rbind(
+  ## Hansen GFC: granule 20N_070W covers the main island.
+  covar_file("hansen", paste0(hansen_base, "treecover2000_20N_070W.tif"),
+             "Hansen_GFC-2025-v1.13_treecover2000_20N_070W.tif", "hansen_2013"),
+  covar_file("hansen", paste0(hansen_base, "lossyear_20N_070W.tif"),
+             "Hansen_GFC-2025-v1.13_lossyear_20N_070W.tif", "hansen_2013"),
+  covar_file("hansen", paste0(hansen_base, "datamask_20N_070W.tif"),
+             "Hansen_GFC-2025-v1.13_datamask_20N_070W.tif", "hansen_2013"),
+
+  ## C-CAP 2010, 30 m (InPort 48300).
+  covar_file("ccap",
+             paste0("https://chs.coast.noaa.gov/htdata/raster1/landcover/",
+                    "bulkdownload/30m_lc/pr_2010_ccap_hr_land_cover20170214_30m.tif"),
+             "pr_2010_ccap_hr_land_cover20170214_30m.tif", "noaa_ccap_2010"),
+
+  ## PR GAP land cover (ScienceBase 560c3b2de4b058f706e5411e).
+  covar_file("gap_landcover",
+             paste0(sb_file, "__disk__da%2Fa9%2Fcf%2Fdaa9cfb5af0e5f616f1865973d855d0245368660"),
+             "puertorico_gap_landcover2000.tif", "gould_2008"),
+
+  ## Holdridge life zones (geodatabase in a zip).
+  covar_file("holdridge",
+             "https://research.fs.usda.gov/sites/default/files/2026-07/iitf-pr_usvi_holdridgelifezones.zip",
+             "iitf-pr_usvi_holdridgelifezones.zip", "ewel_whitmore_1973",
+             unpack = TRUE),
+
+  ## Kennaway & Helmer 2023, RDS-2023-0022.
+  covar_file("helmer_formations",
+             "https://www.fs.usda.gov/rds/archive/products/RDS-2023-0022/RDS-2023-0022.zip",
+             "RDS-2023-0022.zip", "kennaway_helmer_2023", unpack = TRUE),
+
+  ## PRISM annual normals. tmean is derived later as (tmax + tmin) / 2.
+  prism_zip("ppt"), prism_zip("tmax"), prism_zip("tmin")
+)
+
+layers <- get_arg("--layers", "")
+if (nzchar(layers)) {
+  wanted <- strsplit(layers, ",", fixed = TRUE)[[1]]
+  unknown <- setdiff(wanted, COVAR_FILES$layer)
+  if (length(unknown)) {
+    stop("unknown layer(s): ", paste(unknown, collapse = ", "),
+         " (choose from ", paste(unique(COVAR_FILES$layer), collapse = ", "), ")")
+  }
+  COVAR_FILES <- COVAR_FILES[COVAR_FILES$layer %in% wanted, ]
+}
+COVAR_FILES$dest <- file.path(gl_data_root(), "raw", "covariates",
+                              COVAR_FILES$layer, COVAR_FILES$name)
+COVAR_MANIFEST <- file.path(gl_data_root(), "raw", "covariates", "MANIFEST.csv")
+
+gl_msg("data root: ", gl_data_root())
+gl_msg(sprintf("%d files across %d layers", nrow(COVAR_FILES),
+               length(unique(COVAR_FILES$layer))))
+do_download  <- "--download" %in% args
+do_reproject <- "--reproject" %in% args
+if (!do_download && !do_reproject) {
+  print(COVAR_FILES[, c("layer", "name")], row.names = FALSE)
+  gl_msg("dry run — add --download to fetch, --reproject to harmonize")
+  quit(status = 0)
+}
+
+## --- Fetch -----------------------------------------------------------------
+## Same restartable .part/rename download as the G-LiHT files. Zips are kept
+## after unpacking (they are small, and the archive is what a published checksum
+## refers to); gl_download() sees the kept zip and skips it on re-runs.
+failed <- character(0)
+for (i in if (do_download) seq_len(nrow(COVAR_FILES)) else integer(0)) {
+  item <- COVAR_FILES[i, ]
+  already_held <- file.exists(item$dest)
+  gl_msg(sprintf("[%d/%d] %s/%s%s", i, nrow(COVAR_FILES), item$layer, item$name,
+                 if (already_held) " (held)" else ""))
+
+  if (is.null(gl_try(gl_download(item$url, item$dest), item$name))) {
+    failed <- c(failed, item$url)
+    next
+  }
+
+  if (item$unpack) {
+    gl_try(gl_extract(item$dest, dirname(item$dest)), item$name)
+  }
+  if (!already_held) {
+    row <- gl_manifest_row(item$layer, item$name, item$url, item$dest)
+    names(row)[names(row) == "campaign"] <- "layer"
+    row$citation_key <- item$citation_key
+    gl_append_manifest(row[, c("layer", "name", "url", "dest", "bytes", "md5",
+                               "downloaded_utc", "citation_key")],
+                       manifest_path = COVAR_MANIFEST)
+  }
+}
+
+if (do_download) {
+  gl_msg(sprintf("download done: %d failed", length(failed)))
+  for (u in failed) cat("   ", u, "\n")
+}
+
+## --- Harmonize -------------------------------------------------------------
+## covariates-plan.md, "Harmonization": a copy of every layer in EPSG:32161 at
+## roughly its native cell size, under interim/covariates/. raw/ is untouched.
+##   categorical rasters -> nearest neighbour; continuous -> bilinear;
+##   vectors -> reprojected directly.
+## Restartable: an output that already exists is skipped (delete it to redo).
+##
+## Three things worth knowing:
+##   * Hansen is a 10 x 10 degree granule, mostly open ocean. Projecting all of
+##     it would be slow and pointless, so it is cropped to PR_BBOX first. The
+##     crop happens only in this interim copy; raw/ stays whole.
+##   * The PRISM .asc grids ship with no CRS. They are assigned EPSG:4269
+##     (NAD83 lat/lon), PRISM's documented datum; the difference from WGS84 is
+##     about a metre, far below the 450 m cell.
+##   * Holdridge is already NAD83(2011) / PR & VI (a 32161 variant) but is still
+##     reprojected, so every vector in interim/ carries the same declared CRS.
+PR_BBOX <- c(xmin = -68.0, xmax = -65.0, ymin = 17.5, ymax = 18.8)  # lon/lat
+
+HARMONIZE <- data.frame(
+  layer  = c("hansen", "hansen", "hansen", "ccap", "gap_landcover",
+             "helmer_formations", "prism", "holdridge"),
+  ## regex on the path under raw/covariates/<layer>/
+  find   = c("treecover2000.*[.]tif$", "lossyear.*[.]tif$", "datamask.*[.]tif$",
+             "[.]tif$", "[.]tif$", "PR_Land_Cover_TIFF/.*[.]tif$", "[.]asc$",
+             "[.]gdb$"),
+  method = c("bilinear", "near", "near", "near", "near", "near", "bilinear",
+             "vector"),
+  crop   = c(TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE),
+  stringsAsFactors = FALSE
+)
+
+gl_harmonize_raster <- function(src, dest, method, crop, crs_if_missing = "EPSG:4269") {
+  r <- terra::rast(src)
+  ## Read the type now: a cropped raster is in memory-virtual form and reports
+  ## none. Categorical output keeps the source integer type; bilinear needs floats.
+  datatype <- if (method == "near") terra::datatype(r) else "FLT4S"
+  if (terra::crs(r) == "") terra::crs(r) <- crs_if_missing
+  if (crop) {
+    box <- terra::project(terra::vect(terra::ext(PR_BBOX), crs = "EPSG:4326"),
+                          terra::crs(r))
+    r <- terra::crop(r, terra::ext(box), snap = "out")
+  }
+  terra::project(r, paste0("EPSG:", CRS_AREA), method = method, filename = dest,
+                 datatype = datatype, overwrite = TRUE,
+                 gdal = c("COMPRESS=DEFLATE", "TILED=YES"))
+  invisible(dest)
+}
+
+gl_harmonize_vector <- function(src, dest) {
+  layer_name <- sf::st_layers(src)$name[1]
+  v <- sf::st_read(src, layer = layer_name, quiet = TRUE)
+  v <- sf::st_transform(v, CRS_AREA)
+  sf::st_write(v, dest, layer = layer_name, quiet = TRUE, delete_dsn = TRUE)
+  invisible(dest)
+}
+
+n_harmonize_failed <- 0L
+if (do_reproject) {
+  stopifnot(requireNamespace("terra", quietly = TRUE),
+            requireNamespace("sf", quietly = TRUE))
+  raw_root <- file.path(gl_data_root(), "raw", "covariates")
+  interim_root <- file.path(gl_data_root(), "interim", "covariates")
+
+  for (i in seq_len(nrow(HARMONIZE))) {
+    spec <- HARMONIZE[i, ]
+    if (nzchar(layers) && !spec$layer %in% strsplit(layers, ",")[[1]]) next
+
+    layer_dir <- file.path(raw_root, spec$layer)
+    ## Match against the path under the layer directory, not just the file
+    ## name, so a pattern can name the subdirectory it wants.
+    candidates <- list.files(layer_dir, recursive = TRUE, include.dirs = TRUE)
+    sources <- file.path(layer_dir, candidates[grepl(spec$find, candidates)])
+    if (!length(sources)) {
+      gl_msg("no raw files for ", spec$layer, " (", spec$find, ") — run --download")
+      n_harmonize_failed <- n_harmonize_failed + 1L
+      next
+    }
+
+    dir.create(file.path(interim_root, spec$layer), recursive = TRUE,
+               showWarnings = FALSE)
+    for (src in sources) {
+      stem <- tools::file_path_sans_ext(basename(src))
+      dest <- file.path(interim_root, spec$layer, paste0(
+        stem, "_32161", if (spec$method == "vector") ".gpkg" else ".tif"))
+      if (file.exists(dest)) { gl_msg("held: ", basename(dest)); next }
+
+      gl_msg(sprintf("reproject [%s] %s", spec$method, basename(src)))
+      partial <- paste0(dest, ".part")   # rename on success, as gl_download does
+      partial <- sub("([.][^.]+)[.]part$", ".part\\1", partial)
+      ok <- !is.null(gl_try(
+        if (spec$method == "vector") gl_harmonize_vector(src, partial)
+        else gl_harmonize_raster(src, partial, spec$method, spec$crop),
+        basename(src)))
+      if (ok) file.rename(partial, dest) else {
+        unlink(partial)
+        n_harmonize_failed <- n_harmonize_failed + 1L
+      }
+    }
+  }
+  gl_msg(sprintf("reproject done: %d failed", n_harmonize_failed))
+}
+
+quit(status = if (length(failed) || n_harmonize_failed) 1 else 0)

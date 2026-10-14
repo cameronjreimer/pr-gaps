@@ -242,10 +242,13 @@ gl_manifest_row <- function(campaign, name, url, dest,
 
 ## Merge rows into MANIFEST.csv. A new row replaces any older entry for the same
 ## URL, so re-downloading a file updates its record rather than duplicating it.
-gl_append_manifest <- function(rows) {
+## `manifest_path` defaults to the G-LiHT manifest; 03_download_covars.R passes
+## its own.
+gl_append_manifest <- function(rows,
+                               manifest_path = file.path(gl_paths()$products,
+                                                         "MANIFEST.csv")) {
   if (is.null(rows) || !nrow(rows)) return(invisible(NULL))
 
-  manifest_path <- file.path(gl_paths()$products, "MANIFEST.csv")
   if (file.exists(manifest_path)) {
     previous <- utils::read.csv(manifest_path, stringsAsFactors = FALSE)
     previous <- previous[!(previous$url %in% rows$url), , drop = FALSE]
