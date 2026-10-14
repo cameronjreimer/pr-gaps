@@ -44,58 +44,71 @@ get_arg <- function(flag, default = NULL) {
 }
 
 ## --- What to fetch ---------------------------------------------------------
-## One row per file. `layer` is also the raw/covariates/ subdirectory.
+## One row per file. `layer` is also the raw/covariates/ subdirectory, and the
+## key into the source registry (docs/covariate-registry.csv), which holds the
+## version, licence, citation and class-legend notes for each layer.
 hansen_base <- paste0("https://storage.googleapis.com/earthenginepartners-hansen/",
                       "GFC-2025-v1.13/Hansen_GFC-2025-v1.13_")
 prism_base  <- "https://prism.oregonstate.edu/normals_other/public/pr/grids/"
 sb_file     <- "https://www.sciencebase.gov/catalog/file/get/560c3b2de4b058f706e5411e?f="
 
-covar_file <- function(layer, url, name, citation_key, unpack = FALSE) {
-  data.frame(layer = layer, url = url, name = name,
-             citation_key = citation_key, unpack = unpack,
+covar_file <- function(layer, url, name, unpack = FALSE) {
+  data.frame(layer = layer, url = url, name = name, unpack = unpack,
              stringsAsFactors = FALSE)
 }
 
 prism_zip <- function(var) {
   name <- sprintf("PRISM_%s_pr_1963-1995_normal_450mM1_annual_asc.zip", var)
-  covar_file("prism", paste0(prism_base, var, "/", name), name,
-             "prism_pr_1963_1995", unpack = TRUE)
+  covar_file("prism", paste0(prism_base, var, "/", name), name, unpack = TRUE)
 }
 
 COVAR_FILES <- rbind(
   ## Hansen GFC: granule 20N_070W covers the main island.
   covar_file("hansen", paste0(hansen_base, "treecover2000_20N_070W.tif"),
-             "Hansen_GFC-2025-v1.13_treecover2000_20N_070W.tif", "hansen_2013"),
+             "Hansen_GFC-2025-v1.13_treecover2000_20N_070W.tif"),
   covar_file("hansen", paste0(hansen_base, "lossyear_20N_070W.tif"),
-             "Hansen_GFC-2025-v1.13_lossyear_20N_070W.tif", "hansen_2013"),
+             "Hansen_GFC-2025-v1.13_lossyear_20N_070W.tif"),
   covar_file("hansen", paste0(hansen_base, "datamask_20N_070W.tif"),
-             "Hansen_GFC-2025-v1.13_datamask_20N_070W.tif", "hansen_2013"),
+             "Hansen_GFC-2025-v1.13_datamask_20N_070W.tif"),
 
   ## C-CAP 2010, 30 m (InPort 48300).
   covar_file("ccap",
              paste0("https://chs.coast.noaa.gov/htdata/raster1/landcover/",
                     "bulkdownload/30m_lc/pr_2010_ccap_hr_land_cover20170214_30m.tif"),
-             "pr_2010_ccap_hr_land_cover20170214_30m.tif", "noaa_ccap_2010"),
+             "pr_2010_ccap_hr_land_cover20170214_30m.tif"),
 
   ## PR GAP land cover (ScienceBase 560c3b2de4b058f706e5411e).
   covar_file("gap_landcover",
              paste0(sb_file, "__disk__da%2Fa9%2Fcf%2Fdaa9cfb5af0e5f616f1865973d855d0245368660"),
-             "puertorico_gap_landcover2000.tif", "gould_2008"),
+             "puertorico_gap_landcover2000.tif"),
 
   ## Holdridge life zones (geodatabase in a zip).
   covar_file("holdridge",
              "https://research.fs.usda.gov/sites/default/files/2026-07/iitf-pr_usvi_holdridgelifezones.zip",
-             "iitf-pr_usvi_holdridgelifezones.zip", "ewel_whitmore_1973",
-             unpack = TRUE),
+             "iitf-pr_usvi_holdridgelifezones.zip", unpack = TRUE),
 
   ## Kennaway & Helmer 2023, RDS-2023-0022.
   covar_file("helmer_formations",
              "https://www.fs.usda.gov/rds/archive/products/RDS-2023-0022/RDS-2023-0022.zip",
-             "RDS-2023-0022.zip", "kennaway_helmer_2023", unpack = TRUE),
+             "RDS-2023-0022.zip", unpack = TRUE),
 
   ## PRISM annual normals. tmean is derived later as (tmax + tmin) / 2.
   prism_zip("ppt"), prism_zip("tmax"), prism_zip("tmin")
 )
+
+## Every layer fetched here must be in the registry, and each manifest row takes
+## its citation_key from it — so a layer cannot be downloaded without being
+## documented. Registry rows with no files here (ccap_hr is manual; the G-LiHT
+## layers come from 02_download.R) are expected.
+REGISTRY <- utils::read.csv(file.path(repo, "docs", "covariate-registry.csv"),
+                            stringsAsFactors = FALSE)
+unregistered <- setdiff(COVAR_FILES$layer, REGISTRY$layer)
+if (length(unregistered)) {
+  stop("layer(s) missing from docs/covariate-registry.csv: ",
+       paste(unregistered, collapse = ", "))
+}
+COVAR_FILES$citation_key <- REGISTRY$citation_key[match(COVAR_FILES$layer,
+                                                        REGISTRY$layer)]
 
 layers <- get_arg("--layers", "")
 if (nzchar(layers)) {
