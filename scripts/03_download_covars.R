@@ -20,7 +20,10 @@
 ##   Rscript scripts/03_download_covars.R --download      # fetch everything
 ##   Rscript scripts/03_download_covars.R --download --layers hansen,prism
 ##   Rscript scripts/03_download_covars.R --reproject     # raw/ -> interim/ EPSG:32161
-##   (flags combine: --download --reproject does both; reprojecting needs terra and sf)
+##   Rscript scripts/03_download_covars.R --figures      # one map PNG per layer
+##   (flags combine, e.g. --download --reproject --figures; --reproject needs
+##    terra and sf, --figures also ggplot2, ggspatial, ragg, stringr, viridisLite)
+##   Figures go to derived/covariates/figures/.
 ##
 ## Restartable: files already present are skipped. Exits 1 if any file failed.
 ## ---------------------------------------------------------------------------
@@ -138,9 +141,10 @@ gl_msg(sprintf("%d files across %d layers", nrow(COVAR_FILES),
 do_download  <- "--download" %in% args
 do_reproject <- "--reproject" %in% args
 do_register  <- do_download || "--register" %in% args
-if (!do_download && !do_reproject && !do_register) {
+do_figures   <- "--figures" %in% args
+if (!do_download && !do_reproject && !do_register && !do_figures) {
   print(COVAR_FILES[, c("layer", "name")], row.names = FALSE)
-  gl_msg("dry run — add --download to fetch, --reproject to harmonize")
+  gl_msg("dry run — add --download to fetch, --reproject to harmonize, --figures to map")
   quit(status = 0)
 }
 
@@ -344,4 +348,21 @@ if (do_reproject) {
   gl_msg(sprintf("reproject done: %d failed", n_harmonize_failed))
 }
 
-quit(status = if (length(failed) || n_harmonize_failed) 1 else 0)
+## --- Figures -----------------------------------------------------------------
+## One map per harmonized layer, from interim/, with class legends or colour
+## bars. Written to derived/covariates/figures/ (small, so it can be committed).
+## Always redrawn — they are cheap next to the reprojection. See
+## R/ingest/07_covariate_maps.R for what each one shows.
+n_map_failed <- 0L
+if (do_figures) {
+  n_map_failed <- gl_covariate_maps(
+    interim_root = file.path(gl_data_root(), "interim", "covariates"),
+    raw_root     = file.path(gl_data_root(), "raw", "covariates"),
+    out_dir      = file.path(repo, "derived", "covariates", "figures"),
+    registry     = REGISTRY,
+    boundary     = file.path(gl_data_root(), "interim", "boundary", "pr_main_island.gpkg"),
+    layers      = if (nzchar(layers)) strsplit(layers, ",")[[1]] else NULL)
+  gl_msg(sprintf("figures done: %d failed", n_map_failed))
+}
+
+quit(status = if (length(failed) || n_harmonize_failed || n_map_failed) 1 else 0)
