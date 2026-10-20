@@ -1,0 +1,11 @@
+# canopy.py dependencies besides CloudComPy, which ships its own environment
+# (source ~/cloudcompy_env.sh on the server) and is not installable from pip.
+numpy
+scipy
+laspy
+pyproj
+shapely>=2.0
+geopandas
+rasterio
+pyarrow
+pandas
