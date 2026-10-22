@@ -8,7 +8,8 @@ Edit the settings below, then on the server:
 Step 1 computes the distances and saves them to CACHE; if CACHE already holds the
 same inputs and settings it is reused instead. Step 2 finds gaps and writes
 $PR_GAPS_DATA/runs/canopy/<site>/gaps/<run-id>/threshold_<t>m/:
-  gaps.laz      gap points; every point carries its gap's id, volume and area
+  gaps.laz      gap points; every point carries its gap's id, volumes, area and
+                mean/min/max height above ground (NaN without a DTM)
   gaps.gpkg     'footprints' (outline per gap) and 'bboxes' layers, same attributes
   gaps.csv      one row per gap
   voxels.parquet, point_labels.npy, metadata.json   internals for reuse
@@ -1458,7 +1459,14 @@ def _rows(columns):
         yield {name: value.item() for name, value in zip(names, values)}
 
 
-PER_POINT = ("gap_volume_m3", "voxel_volume_m3", "footprint_area_m2")
+PER_POINT = (
+    "gap_volume_m3",
+    "voxel_volume_m3",
+    "footprint_area_m2",
+    "mean_hag_m",
+    "min_hag_m",
+    "max_hag_m",
+)
 
 
 def _write_laz(path, manifest, arrays, labels, components):
