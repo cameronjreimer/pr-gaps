@@ -20,6 +20,19 @@ return separation; neither volume is confirmed empty space or biomass.
 
 from __future__ import annotations
 
+import sys
+
+# The Windows CloudComPy wheel bundles a newer OpenSSL than Python's own, which
+# hashlib (below, and inside scipy) loads. Windows keeps whichever libcrypto loads
+# first, so CloudComPy must come first or it fails with "DLL load failed ...
+# procedure could not be found". A missing CloudComPy is still reported by
+# import_cloudcompy(), and only when step 1 needs it.
+if sys.platform == "win32":
+    try:
+        import cloudComPy  # noqa: F401
+    except (ImportError, OSError):
+        pass
+
 from contextlib import ExitStack, contextmanager
 import csv
 from datetime import datetime
@@ -62,7 +75,8 @@ POST = [
     f"{GLIHT}/PR_25April2018_EV1/lidar/las/PR_25April2018_EV1_c4r2.las.gz",
     f"{GLIHT}/PR_25April2018_EV1/lidar/las/PR_25April2018_EV1_c5r2.las.gz",
 ]
-STUDY_AREA = REPO / "sites" / "lfdp" / "lfdp_buf50.gpkg"  # None = whole tiles
+# None = whole tiles. Built from data/raw/shapefiles/LFDP/LFDP.shp by make_study_area.py.
+STUDY_AREA = DATA / "interim" / "sites" / "lfdp" / "lfdp_buf50.gpkg"
 # None = no heights above ground. Unpacked from PR_5March2017_EV1_DTM.tif.gz by the
 # download step; override with PR_GAPS_DTM (server copy: /workdir/ogh6/ev1/...).
 DTM = os.environ.get("PR_GAPS_DTM") or (
@@ -980,6 +994,11 @@ def prepare(args):
         )
         del reference
         (directory / "post.raw").unlink()
+        # Close the memory maps into the staging directory: Windows refuses to
+        # rename a directory while any file in it is still mapped.
+        del xyz, arrays, valid
+        if args.dtm:
+            del hag
         verify_source_files(sources + references)
         for key in ("study_area", "post_transform_file", "dtm"):
             verify_source_files(config[key])
@@ -1695,8 +1714,8 @@ def check_inputs():
     if missing:
         raise SystemExit(
             "Missing inputs:\n  " + "\n  ".join(missing)
-            + "\nSet PR_GAPS_GLIHT / PR_GAPS_DTM, download the campaigns, or copy the"
-            " study-area polygon into sites/ (see python/README.md)."
+            + "\nSet PR_GAPS_GLIHT / PR_GAPS_DTM, download the campaigns, or build the"
+            " study area with python/make_study_area.py (see python/README.md)."
         )
 
 

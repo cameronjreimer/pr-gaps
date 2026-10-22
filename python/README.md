@@ -18,7 +18,7 @@ before step 1. The revisions in the plan aren't made yet.
 | Site | `lfdp`: Luquillo Forest Dynamics Plot + 50 m buffer |
 | Pre | `PR_5March2017_EV1` tiles `c4r2`, `c5r2` |
 | Post | `PR_25April2018_EV1` tiles `c4r2`, `c5r2` |
-| Study area | `sites/lfdp/lfdp_buf50.gpkg` (copy it in; see `sites/lfdp/README.md`) |
+| Study area | `$PR_GAPS_DATA/interim/sites/lfdp/lfdp_buf50.gpkg`: plot polygon + 50 m (25.05 ha) |
 | DTM | `PR_5March2017_EV1_DTM.tif` (heights above ground) |
 | Thresholds | 2 m, 5 m |
 
@@ -26,6 +26,19 @@ The plot falls in tiles `c4r2`/`c5r2` of both EV1 flights (`derived/inventory/pr
 layer `tiles`). The same tiles cover it in `PR_15March2017_EV1` (c4r2 only holds data) and
 `PR_15March2020_EV1`. Strips `l0s14`/`l0s15` of `PR_11March2017_FIA30` → `PR_30April2018_FIA30`
 are a second, independent 2017→2018 pair over the plot.
+
+The study area is derived from the unbuffered plot polygon `$PR_GAPS_DATA/raw/shapefiles/LFDP/LFDP.shp`
+(16.05 ha, EPSG:32620) by
+
+```bash
+.venv/Scripts/python python/make_study_area.py
+```
+
+which dissolves it, buffers it by 50 m and writes the GeoPackage. Pass `SOURCE BUFFER_M OUTPUT`
+for another site or buffer. An existing output is left alone unless you pass `--force`. Rewriting
+it changes its mtime, which the distance cache is keyed on, so the cache would stop loading.
+Only 2017 points inside the polygon are analysed. 2018 points from the whole tiles stay in the
+reference, so edge points are compared with their true nearest neighbours.
 
 ## Paths
 
@@ -67,6 +80,13 @@ bash python/init_env.sh
 `canopy.exact_c2c` on a synthetic pair and compares it with scipy's exact
 nearest-neighbour distances. Run it on its own to check any environment, including the
 server's conda one.
+
+**Windows import order.** The CloudComPy wheel bundles OpenSSL 3.6. Python's `hashlib`
+loads Python's own older OpenSSL, and `canopy.py` and scipy both import `hashlib`. Windows
+keeps whichever `libcrypto-3-x64.dll` loads first, so if `hashlib` comes first,
+CloudComPy fails with `DLL load failed ... The specified procedure could not be found`.
+`canopy.py` therefore imports CloudComPy before anything else on Windows. Any new script
+that uses CloudComPy needs to do the same, or import `canopy` first.
 
 ## Running it
 

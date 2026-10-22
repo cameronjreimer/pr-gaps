@@ -12,20 +12,20 @@ import sys
 import tempfile
 from pathlib import Path
 
-import numpy as np
-
-# Same order as canopy.prepare(): GDAL-linked packages load before CloudComPy,
-# which is where Windows DLL clashes would show up.
-import laspy
-import pyproj
-import shapely
-import geopandas
-import rasterio
-import pyarrow
-from scipy.spatial import cKDTree
-
+# canopy is imported first, as when it runs as a script: on Windows the order in
+# which native libraries load decides which copy of a shared DLL wins (see the top
+# of canopy.py), so importing anything else first could hide a clash.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import canopy  # noqa: E402
+
+import numpy as np  # noqa: E402
+import laspy  # noqa: E402
+import pyproj  # noqa: E402
+import shapely  # noqa: E402
+import geopandas  # noqa: E402
+import rasterio  # noqa: E402
+import pyarrow  # noqa: E402
+from scipy.spatial import cKDTree  # noqa: E402
 
 TOLERANCE_M = 1e-4
 
@@ -34,6 +34,10 @@ def main():
     print(f"python {sys.version.split()[0]} at {sys.executable}")
     for module in (np, laspy, pyproj, shapely, geopandas, rasterio, pyarrow):
         print(f"  {module.__name__:<10} {module.__version__}")
+    if not laspy.LazBackend.detect_available():
+        print("FAIL: laspy has no LAZ backend, so gaps.laz cannot be written "
+              "(pip install 'laspy[lazrs]')")
+        return 1
     try:
         cc = canopy.import_cloudcompy()
     except RuntimeError as exc:

@@ -429,7 +429,6 @@ G-LIHT/
     R/inventory/07_report.R        summary tables and figures
     R/inventory/08_basemap.R       Puerto Rico coastline for the maps
     python/canopy.py               point-cloud C2C change → 3D gaps (CloudComPy); see python/README.md
-    sites/<site>/                  hand-made study-area polygons for prototype sites
     derived/inventory/             committed outputs (CSV, GPKG, figures)
     docs/plan.md                   the 13-week plan
     docs/decisions/                ADRs, one per decision

@@ -2,7 +2,7 @@
 # init_env.sh install it from a downloaded wheel (see README.md).
 numpy
 scipy
-laspy
+laspy[lazrs]  # lazrs: LAZ compression for the gaps.laz export
 pyproj
 shapely>=2.0
 geopandas
