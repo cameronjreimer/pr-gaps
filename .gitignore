@@ -19,3 +19,5 @@ derived/inventory/pr_gliht_state.rds
 # Python
 __pycache__/
 *.pyc
+.venv/
+python/wheels/

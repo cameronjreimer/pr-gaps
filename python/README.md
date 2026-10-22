@@ -39,7 +39,42 @@ are a second, independent 2017→2018 pair over the plot.
 Outputs go to `$PR_GAPS_DATA/runs/canopy/<site>/`: the distance cache in `cache/`, and
 `gaps/<run-id>/threshold_<t>m/` per gap run. Nothing is written into the repository.
 
+## Environment
+
+`init_env.ps1` (Windows) and `init_env.sh` (Linux) build a venv at `pr-gaps/.venv`
+(override with `PR_GAPS_VENV`) containing CloudComPy and `requirements.txt`. Both are
+safe to re-run: an environment that already passes `check_env.py` is left alone, and
+`-Force` / `--force` rebuilds it.
+
+CloudComPy isn't on PyPI, and its download page asks you to accept the GPL, so you
+download the wheel yourself first. Get `cloudcompy-<version>-cp312-cp312-win_amd64.whl`
+(or `...linux_x86_64.whl`) from the
+[Windows](https://www.simulation.openfields.fr/index.php/cloudcompy-downloads/3-cloudcompy-binaries/13-experimental-pypi-wheels-install-with-pip/15-windows-wheel-files)
+or [Linux](https://www.simulation.openfields.fr/index.php/cloudcompy-downloads/3-cloudcompy-binaries/13-experimental-pypi-wheels-install-with-pip/14-linux-wheel-files)
+wheel page. Leave it in Downloads or `python/wheels/`, and the script finds it. The
+venv uses whichever Python the wheel was built for (cp310–cp314), fetched by
+[uv](https://docs.astral.sh/uv) if needed.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File python\init_env.ps1
+```
+
+```bash
+bash python/init_env.sh
+```
+
+`check_env.py` imports everything in the order `canopy.py` does, then runs
+`canopy.exact_c2c` on a synthetic pair and compares it with scipy's exact
+nearest-neighbour distances. Run it on its own to check any environment, including the
+server's conda one.
+
 ## Running it
+
+Locally, after `init_env.ps1` and the download below:
+
+```powershell
+.\.venv\Scripts\python.exe python\canopy.py
+```
 
 On the server:
 
@@ -50,9 +85,6 @@ export PR_GAPS_GLIHT=/ibstorage/shared/PR_NASA_GLiHT
 export PR_GAPS_DTM=/workdir/ogh6/ev1/PR_5March2017_EV1_DTM.tif
 python python/canopy.py
 ```
-
-Requirements: CloudComPy (installed from its own environment, not pip), plus the packages
-in `requirements.txt`.
 
 To fetch just the LFDP tiles into `$PR_GAPS_DATA` instead (≈2.1 GB of LAS + 2 DTMs, about
 45 min at the server's ~0.75 MB/s), from the repository root in R:

@@ -1,5 +1,5 @@
-# canopy.py dependencies besides CloudComPy, which ships its own environment
-# (source ~/cloudcompy_env.sh on the server) and is not installable from pip.
+# canopy.py dependencies besides CloudComPy, which is not on PyPI: init_env.ps1 /
+# init_env.sh install it from a downloaded wheel (see README.md).
 numpy
 scipy
 laspy
