@@ -22,8 +22,8 @@
 set -euo pipefail
 
 SITE="${1:-lfdp}"
-export PR_GAPS_DATA="${PR_GAPS_DATA:-/path/to/pr_gaps_data}"   # runs/ and interim/ live here
-export PR_GAPS_GLIHT="${PR_GAPS_GLIHT:-/path/to/gliht}"        # holds <campaign>/lidar/las/...
+export PR_GAPS_DATA="${PR_GAPS_DATA:-/ibstorage/cam/G-LiHT/data}"   # runs/ and interim/ live here
+export PR_GAPS_GLIHT="${PR_GAPS_GLIHT:-/ibstorage/cam/G-LiHT/data/raw/gliht}"        # holds <campaign>/lidar/las/...
 # export PR_GAPS_DTM=/path/to/PR_5March2017_EV1_DTM.tif        # only if not unpacked under PR_GAPS_GLIHT
 
 cd "${SLURM_SUBMIT_DIR:-.}"
