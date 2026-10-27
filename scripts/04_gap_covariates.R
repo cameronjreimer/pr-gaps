@@ -6,21 +6,25 @@
 ## 'footprints', EPSG:32620) and summarizes each covariate within each gap:
 ##
 ##   interim/covariates/ (EPSG:32161; ADR 008)
-##     ccap_code/_class    C-CAP 2010 30 m            area-weighted mode
-##     gap_code/_class     PR GAP land cover ~2000    area-weighted mode
+##     ccap_code/_class    C-CAP 2010 30 m            mode of cells
+##     gap_code/_class     PR GAP land cover ~2000    mode of cells
 ##     holdridge           Holdridge life zone        zone with the largest overlap
-##     ppt_mm              PRISM 1963-1995            area-weighted mean (raw / 100)
-##     tmax_c, tmin_c      PRISM 1963-1995            area-weighted mean (raw / 100)
+##     ppt_mm              PRISM 1963-1995            mean of cells (raw / 100)
+##     tmax_c, tmin_c      PRISM 1963-1995            mean of cells (raw / 100)
 ##   raw/gliht/<2017 campaign>/lidar/geotiff/ (EPSG:32620, 1 m)
-##     elev_m              DTM                        area-weighted mean
-##     slope_deg           slope                      area-weighted mean
+##     elev_m              DTM                        mean of cells
+##     slope_deg           slope                      mean of cells
 ##     aspect_deg          aspect                     circular mean, 0-360
-##     chm_mean_m/_max_m   CHM (pre-Maria canopy)     area-weighted mean / max
+##     chm_mean_m/_max_m   CHM (pre-Maria canopy)     mean / max of cells
 ##
-## WHY area-weighted (extract(exact = TRUE)): the median gap is ~8 m^2, smaller
-## than one cell of every interim layer. A plain extract() only takes cells whose
-## centre is inside the polygon, so most gaps would get NA; weighting each cell by
-## the share of the gap it covers gives a sub-cell gap the value it sits in.
+## Cells are terra::extract()'s default: those whose centre falls in the gap,
+## and for a gap smaller than a cell (the median gap is ~8 m^2), the cell it
+## sits in — so every gap gets a value. Cells are not weighted by area.
+## WHY not extract(exact = TRUE): measured on the LFDP 2 m run (2,131 gaps) it
+## changed nothing on the 1 m G-LiHT rasters (canopy.py's 1 m voxels share their
+## grid, origin 0,0, so cells are wholly in or out), nothing on C-CAP or GAP
+## modes, and PRISM by >1 mm for 43 gaps that straddle a 450 m cell (max 93 mm)
+## — while taking ~90 s per coarse layer against under a second.
 ##
 ## Gaps are reprojected to 32161 for the interim layers (a vector transform,
 ## exact); the G-LiHT rasters are sampled in their own CRS, so nothing is
@@ -126,19 +130,19 @@ GAP_NAMES <- local({
 })
 
 ## --- Summaries --------------------------------------------------------------
-## Cell values and the share of each gap they cover, one row per (gap, cell).
-## raw = TRUE returns class codes rather than the GAP raster's labels.
-## WHY crop first: extract() otherwise goes back to the file for every polygon,
-## which on the 1 m EV1 mosaics was ~10x slower than cropping the gaps' extent
-## into memory once (27 s against ~4 min for the LFDP DTM).
+## Cell values in each gap, one row per (gap, cell). Every cell gets weight 1,
+## so the summaries below are plain means and counts (see the header for why
+## not area weights). raw = TRUE returns class codes, not the GAP raster's labels.
+## Cropping the gaps' extent into memory first saves extract() going back to
+## the 1 m EV1 mosaics on disk for every polygon.
 cells <- function(r, polys) {
   v <- vect(polys)
   r <- crop(r[[1]], ext(v) + 2 * max(res(r)), snap = "out")
   if (prod(dim(r)[1:2]) < 5e7) r <- r * 1     # into memory, if it fits
-  x <- as.data.frame(extract(r, v, exact = TRUE, raw = TRUE,
-                             ID = TRUE))      # raw = TRUE returns a matrix
-  names(x) <- c("ID", "value", "fraction")
-  x[!is.na(x$value) & x$fraction > 0, ]
+  x <- as.data.frame(extract(r, v, raw = TRUE, ID = TRUE))  # raw: a matrix
+  names(x) <- c("ID", "value")
+  x$fraction <- 1
+  x[!is.na(x$value), ]
 }
 
 ## Each summary returns one value per gap (length n), NA where nothing was sampled.
