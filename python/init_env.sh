@@ -104,6 +104,14 @@ EOF
     exit 1
 fi
 
+# The 2.14-beta Linux wheel's __init__.py misspells cloudComPyInstallDir once, which
+# raises NameError on import. Fix the spelling if it is still there.
+init_py="$("$PY" -c 'import importlib.util as u; print(u.find_spec("cloudComPy").origin)')"
+if grep -q 'cloudcompyInstallDir' "$init_py"; then
+    echo "Patching CloudComPy typo (cloudcompyInstallDir) in $init_py"
+    sed -i 's/cloudcompyInstallDir/cloudComPyInstallDir/g' "$init_py"
+fi
+
 printf '\nChecking the new environment\n'
 if ! "$PY" "$HERE/check_env.py"; then
     printf '\nThe environment was built but failed the check above.\n'
