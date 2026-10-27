@@ -85,12 +85,14 @@ bash python/init_env.sh
 nearest-neighbour distances. Run it on its own to check any environment, including the
 server's conda one.
 
-**Windows import order.** The CloudComPy wheel bundles OpenSSL 3.6. Python's `hashlib`
-loads Python's own older OpenSSL, and `canopy.py` and scipy both import `hashlib`. Windows
-keeps whichever `libcrypto-3-x64.dll` loads first, so if `hashlib` comes first,
-CloudComPy fails with `DLL load failed ... The specified procedure could not be found`.
-`canopy.py` therefore imports CloudComPy before anything else on Windows. Any new script
-that uses CloudComPy needs to do the same, or import `canopy` first.
+**Import order.** The CloudComPy wheels bundle OpenSSL 3.6, and a process keeps
+whichever OpenSSL loads first. Python's `hashlib` (imported by `canopy.py` and scipy) and
+GDAL (via rasterio) load an older one: Python's own on Windows, `/lib64/libcrypto.so.3`
+on the cluster. If either comes first, CloudComPy fails, on Windows with
+`DLL load failed ... The specified procedure could not be found`, on Linux with
+``/lib64/libcrypto.so.3: version `OPENSSL_3.6.0' not found``. `canopy.py` therefore imports
+CloudComPy before anything else. Any new script that uses CloudComPy needs to do the same,
+or import `canopy` first.
 
 ## Running it
 

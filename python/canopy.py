@@ -31,16 +31,17 @@ import sys
 if sys.platform != "win32":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-# The Windows CloudComPy wheel bundles a newer OpenSSL than Python's own, which
-# hashlib (below, and inside scipy) loads. Windows keeps whichever libcrypto loads
-# first, so CloudComPy must come first or it fails with "DLL load failed ...
-# procedure could not be found". A missing CloudComPy is still reported by
-# import_cloudcompy(), and only when step 1 needs it.
-if sys.platform == "win32":
-    try:
-        import cloudComPy  # noqa: F401
-    except (ImportError, OSError):
-        pass
+# The CloudComPy wheels bundle OpenSSL 3.6, newer than Python's own or the
+# system's, and a process keeps whichever libcrypto loads first. hashlib (below,
+# and inside scipy) and GDAL load the older one, after which CloudComPy fails:
+# Windows "DLL load failed ... procedure could not be found", Linux
+# "/lib64/libcrypto.so.3: version `OPENSSL_3.6.0' not found". So CloudComPy loads
+# first. A missing CloudComPy is still reported by import_cloudcompy(), and only
+# when step 1 needs it.
+try:
+    import cloudComPy  # noqa: F401
+except (ImportError, OSError):
+    pass
 
 from contextlib import ExitStack, contextmanager
 import csv
