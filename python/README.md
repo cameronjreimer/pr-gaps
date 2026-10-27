@@ -137,6 +137,11 @@ export LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so.6)"):$LD_
 Without a suitable module, `micromamba create -p ~/libstdcxx -c conda-forge 'libstdcxx>=13.2'`
 followed by `export LD_LIBRARY_PATH=~/libstdcxx/lib:$LD_LIBRARY_PATH` does the same.
 
+**No display.** CloudComPy starts a Qt application on import. On Linux, `canopy.py` sets
+`QT_QPA_PLATFORM=offscreen` (unless you set it yourself), so it runs in batch jobs and over
+SSH sessions whose X11 forwarding has no X server behind it. Any other script that imports
+CloudComPy directly needs the same setting.
+
 ### EV1 on a Linux HPC
 
 ```bash
@@ -146,6 +151,13 @@ export PR_GAPS_DATA=/path/to/pr_gaps_data
 export PR_GAPS_GLIHT=/path/to/gliht      # holds PR_5March2017_EV1/ and PR_25April2018_EV1/
 export PR_GAPS_DTM=/path/to/PR_5March2017_EV1_DTM.tif   # only if it isn't unpacked under PR_GAPS_GLIHT
 PR_GAPS_SITE=ev1 .venv/bin/python python/canopy.py
+```
+
+Or as a Slurm job, which also loads GCC and sets the headless Qt platform. Set the two
+paths at the top of the script first:
+
+```bash
+sbatch -J canopy-ev1 python/run_canopy.sbatch ev1
 ```
 
 Expected cost, scaled from LFDP (9.0 M 2017 points, about 1.5 min in total):

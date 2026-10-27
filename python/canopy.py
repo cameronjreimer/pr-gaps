@@ -21,7 +21,15 @@ return separation; neither volume is confirmed empty space or biomass.
 
 from __future__ import annotations
 
+import os
 import sys
+
+# CloudComPy starts a Qt application on import. Nothing here draws a window, and on a
+# cluster there is usually no display (batch jobs) or a broken one (X11 forwarding
+# without a local X server), which makes Qt abort the process. Use Qt's headless
+# platform unless one was chosen explicitly.
+if sys.platform != "win32":
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # The Windows CloudComPy wheel bundles a newer OpenSSL than Python's own, which
 # hashlib (below, and inside scipy) loads. Windows keeps whichever libcrypto loads
