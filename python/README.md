@@ -11,16 +11,18 @@ The method is unchanged from the server copy (`canopy (2).py`, 2026-10-20). Only
 settings block now follows this repository's path conventions, and a preflight check runs
 before step 1. The revisions in the plan aren't made yet.
 
-## Current setup: LFDP only
+## Sites
 
-| Setting | Value |
-|---|---|
-| Site | `lfdp`: Luquillo Forest Dynamics Plot + 50 m buffer |
-| Pre | `PR_5March2017_EV1` tiles `c4r2`, `c5r2` |
-| Post | `PR_25April2018_EV1` tiles `c4r2`, `c5r2` |
-| Study area | `$PR_GAPS_DATA/interim/sites/lfdp/lfdp_buf50.gpkg`: plot polygon + 50 m (25.05 ha) |
-| DTM | `PR_5March2017_EV1_DTM.tif` (heights above ground) |
-| Thresholds | 2 m, 5 m |
+Pick one with the `SITE = ...` line in the settings block, or with `PR_GAPS_SITE` without
+editing the file. The default is `lfdp`.
+
+| Site | Pre (5 Mar 2017) | Post | Study area | DTM | Thresholds |
+|---|---|---|---|---|---|
+| `lfdp` | `PR_5March2017_EV1` tiles `c4r2`, `c5r2` | `PR_25April2018_EV1` same tiles | `$PR_GAPS_DATA/interim/sites/lfdp/lfdp_buf50.gpkg`: plot + 50 m (25.05 ha) | 2017 EV1 | 2 m, 5 m |
+| `ev1` | all 24 `PR_5March2017_EV1` tiles (384 M points) | all 22 `PR_25April2018_EV1` tiles (327 M) | none: whole tiles, clipped to both-flights coverage | 2017 EV1 | 2 m, 5 m |
+| `fia12` | `PR_11March2017_FIA12` (23 tiles) | `PR_2May018_FIA12` | none | none | 5 m |
+
+Each site gets its own cache and gap runs under `$PR_GAPS_DATA/runs/canopy/<site>/`.
 
 The plot falls in tiles `c4r2`/`c5r2` of both EV1 flights (`derived/inventory/pr_footprints.gpkg`,
 layer `tiles`). The same tiles cover it in `PR_15March2017_EV1` (c4r2 only holds data) and
@@ -46,7 +48,9 @@ reference, so edge points are compared with their true nearest neighbours.
 |---|---|---|
 | `PR_GAPS_DATA` | `../data` beside the repo | data root, same as the R code |
 | `PR_GAPS_GLIHT` | `$PR_GAPS_DATA/raw/gliht` | campaign directories in server layout. On the server: `/ibstorage/shared/PR_NASA_GLiHT` |
-| `PR_GAPS_DTM` | `$PR_GAPS_GLIHT/PR_5March2017_EV1/lidar/geotiff/PR_5March2017_EV1_DTM.tif` | unpacked DTM |
+| `PR_GAPS_SITE` | `lfdp` | which entry of `SITES` to run, if the `SITE` line isn't edited |
+| `PR_GAPS_DTM` | the site's DTM: `$PR_GAPS_GLIHT/PR_5March2017_EV1/lidar/geotiff/PR_5March2017_EV1_DTM.tif` for `lfdp`/`ev1` | replaces the selected site's DTM path; it must be the unpacked `.tif` |
+| `PR_GAPS_THREADS` | `$SLURM_CPUS_PER_TASK`, else 16 | C2C threads; not part of the cache identity |
 | `PR_GAPS_SCRATCH` | `/workdir/ogh6/tmp` | where `.laz.gz` expands; used only if it exists |
 
 Outputs go to `$PR_GAPS_DATA/runs/canopy/<site>/`: the distance cache in `cache/`, and
@@ -103,7 +107,7 @@ source ~/cloudcompy_env.sh
 export PR_GAPS_DATA=/path/to/pr_gaps_data
 export PR_GAPS_GLIHT=/ibstorage/shared/PR_NASA_GLiHT
 export PR_GAPS_DTM=/workdir/ogh6/ev1/PR_5March2017_EV1_DTM.tif
-python python/canopy.py
+python python/canopy.py                  # PR_GAPS_SITE=ev1 for the whole block
 ```
 
 To fetch just the LFDP tiles into `$PR_GAPS_DATA` instead (≈2.1 GB of LAS + 2 DTMs, about
@@ -119,9 +123,38 @@ plan <- plan[plan$product == "dtm" | grepl("_c[45]r2[.]las[.]gz$", plan$name), ]
 gl_run_download(plan, dry_run = FALSE)
 ```
 
-## Changing site
+### EV1 on a Linux HPC
 
-Edit the settings block: `SITE`, `PRE`, `POST`, `STUDY_AREA`, `DTM`, `THRESHOLDS`. The FIA12
-setup is kept there, commented out. `PRE`/`POST` accept files or campaign `lidar/las`
-directories, and `TILE_FILTER` narrows a directory to some tiles. Each site gets its own
-cache, and a cache is reused only when its inputs and step-1 settings are identical.
+```bash
+cd pr-gaps
+bash python/init_env.sh                  # or: source your CloudComPy env, then python python/check_env.py
+export PR_GAPS_DATA=/path/to/pr_gaps_data
+export PR_GAPS_GLIHT=/path/to/gliht      # holds PR_5March2017_EV1/ and PR_25April2018_EV1/
+export PR_GAPS_DTM=/path/to/PR_5March2017_EV1_DTM.tif   # only if it isn't unpacked under PR_GAPS_GLIHT
+PR_GAPS_SITE=ev1 .venv/bin/python python/canopy.py
+```
+
+Expected cost, scaled from LFDP (9.0 M 2017 points, about 1.5 min in total):
+
+- **Memory:** CloudComPy holds both clouds and their search index in RAM during the
+  distance step, roughly 15–20 GB for 711 M points, plus copies. Request at least 48 GB
+  and preferably 64 GB.
+- **Disk:** about 26 GB of distance cache in `runs/canopy/ev1/cache/`. That includes an
+  optional `source_c2c.bin` CloudCompare file of about 7 GB, which you can delete after the
+  run. Each threshold folder is a few GB more.
+- **Time:** about 30–60 min. Reading the compressed LAS dominates step 1. In step 2, the
+  per-gap convex hulls and GeoPackage outlines loop in Python, so expect minutes to tens of
+  minutes at ~10⁵ gaps.
+- **Threads:** under Slurm the thread count follows `--cpus-per-task`. Otherwise set
+  `PR_GAPS_THREADS`.
+
+If the run dies after step 1, run the same command again. A complete cache is reused, and
+step 2 resumes whatever threshold folders and exports are missing. A run killed during
+step 1 leaves a hidden `.cache-*` folder beside `cache/`, which you can delete.
+
+## Adding a site
+
+Add an entry to `SITES` in `canopy.py` with `pre`, `post`, `study_area`, `dtm` and
+`thresholds`. `pre`/`post` accept LAS files or campaign `lidar/las` directories, and
+`TILE_FILTER` narrows a directory to some tiles. A cache is reused only when its inputs
+and step-1 settings are identical.

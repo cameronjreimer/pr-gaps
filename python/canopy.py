@@ -1,9 +1,9 @@
 """Canopy gap pipeline: 2017 -> 2018 G-LiHT cloud-to-cloud change, grouped into 3D gaps.
 
-Edit the settings below, then on the server:
+Pick a site with SITE below (or PR_GAPS_SITE=lfdp|ev1|fia12), then on the server:
     source ~/cloudcompy_env.sh
     export PR_GAPS_GLIHT=/ibstorage/shared/PR_NASA_GLiHT   # omit to use $PR_GAPS_DATA/raw/gliht
-    python python/canopy.py
+    PR_GAPS_SITE=ev1 python python/canopy.py
 
 Step 1 computes the distances and saves them to CACHE; if CACHE already holds the
 same inputs and settings it is reused instead. Step 2 finds gaps and writes
@@ -65,33 +65,53 @@ DATA = Path(os.environ.get("PR_GAPS_DATA") or REPO.parent / "data")
 # On the server, point this at the shared copy: /ibstorage/shared/PR_NASA_GLiHT
 GLIHT = os.environ.get("PR_GAPS_GLIHT") or str(DATA / "raw" / "gliht")
 
-# Luquillo plot + 50 m buffer on EV1, 5 Mar 2017 -> 25 Apr 2018. The plot falls in
-# tiles c4r2 and c5r2 of both flights (derived/inventory/pr_footprints.gpkg, 'tiles').
-SITE = "lfdp"
-PRE = [
-    f"{GLIHT}/PR_5March2017_EV1/lidar/las/PR_5March2017_EV1_c4r2.las.gz",
-    f"{GLIHT}/PR_5March2017_EV1/lidar/las/PR_5March2017_EV1_c5r2.las.gz",
-]
-POST = [
-    f"{GLIHT}/PR_25April2018_EV1/lidar/las/PR_25April2018_EV1_c4r2.las.gz",
-    f"{GLIHT}/PR_25April2018_EV1/lidar/las/PR_25April2018_EV1_c5r2.las.gz",
-]
-# None = whole tiles. Built from data/raw/shapefiles/LFDP/LFDP.shp by make_study_area.py.
-STUDY_AREA = DATA / "interim" / "sites" / "lfdp" / "lfdp_buf50.gpkg"
-# None = no heights above ground. Unpacked from PR_5March2017_EV1_DTM.tif.gz by the
-# download step; override with PR_GAPS_DTM (server copy: /workdir/ogh6/ev1/...).
-DTM = os.environ.get("PR_GAPS_DTM") or (
-    f"{GLIHT}/PR_5March2017_EV1/lidar/geotiff/PR_5March2017_EV1_DTM.tif"
-)
-THRESHOLDS = [2, 5]
+EV1_2017 = f"{GLIHT}/PR_5March2017_EV1"
+EV1_2018 = f"{GLIHT}/PR_25April2018_EV1"
+# Unpacked from PR_5March2017_EV1_DTM.tif.gz by the download step.
+EV1_DTM = f"{EV1_2017}/lidar/geotiff/PR_5March2017_EV1_DTM.tif"
 
-# FIA12, 23-tile flight line, 11 Mar 2017 -> 2 May 2018:
-# SITE = "fia12"
-# PRE = [f"{GLIHT}/PR_11March2017_FIA12/lidar/las"]
-# POST = [f"{GLIHT}/PR_2May018_FIA12/lidar/las"]
-# STUDY_AREA = None
-# DTM = None
-# THRESHOLDS = [5]
+# PRE/POST take LAS files or campaign lidar/las directories. STUDY_AREA None = whole
+# tiles (the both-flights coverage mask still applies). DTM None = no heights above ground.
+SITES = {
+    # Luquillo plot + 50 m buffer, 5 Mar 2017 -> 25 Apr 2018. The plot falls in tiles
+    # c4r2 and c5r2 of both flights (derived/inventory/pr_footprints.gpkg, 'tiles').
+    # The study area is built from data/raw/shapefiles/LFDP/LFDP.shp by make_study_area.py.
+    "lfdp": dict(
+        pre=[f"{EV1_2017}/lidar/las/PR_5March2017_EV1_{t}.las.gz" for t in ("c4r2", "c5r2")],
+        post=[f"{EV1_2018}/lidar/las/PR_25April2018_EV1_{t}.las.gz" for t in ("c4r2", "c5r2")],
+        study_area=DATA / "interim" / "sites" / "lfdp" / "lfdp_buf50.gpkg",
+        dtm=EV1_DTM,
+        thresholds=[2, 5],
+    ),
+    # The whole EV1 block, 5 Mar 2017 -> 25 Apr 2018: 24 and 22 tiles, 384 M and
+    # 327 M points. One untiled run; see python/README.md for memory and disk.
+    "ev1": dict(
+        pre=[f"{EV1_2017}/lidar/las"],
+        post=[f"{EV1_2018}/lidar/las"],
+        study_area=None,
+        dtm=EV1_DTM,
+        thresholds=[2, 5],
+    ),
+    # FIA12, 23-tile flight line, 11 Mar 2017 -> 2 May 2018.
+    "fia12": dict(
+        pre=[f"{GLIHT}/PR_11March2017_FIA12/lidar/las"],
+        post=[f"{GLIHT}/PR_2May018_FIA12/lidar/las"],
+        study_area=None,
+        dtm=None,
+        thresholds=[5],
+    ),
+}
+
+SITE = os.environ.get("PR_GAPS_SITE") or "lfdp"  # <- the switch: "lfdp", "ev1", "fia12"
+
+if SITE not in SITES:
+    raise SystemExit(f"Unknown SITE {SITE!r}; choose one of {', '.join(SITES)}")
+PRE = SITES[SITE]["pre"]
+POST = SITES[SITE]["post"]
+STUDY_AREA = SITES[SITE]["study_area"]
+# PR_GAPS_DTM replaces the selected site's DTM (server copy: /workdir/ogh6/ev1/...).
+DTM = os.environ.get("PR_GAPS_DTM") or SITES[SITE]["dtm"]
+THRESHOLDS = SITES[SITE]["thresholds"]
 
 CACHE = DATA / "runs" / "canopy" / SITE / "cache"
 # .laz.gz tiles expand here, not on the shared root disk; used only if it exists.
@@ -105,7 +125,8 @@ POST_TRANSFORM = None  # JSON 4x4 rigid matrix applied to 2018 points
 COVERAGE_RESOLUTION = 1.0  # m, size of the both-flights coverage columns
 MIN_PRE_RETURNS = 1
 MIN_POST_RETURNS = 1
-THREADS = 16
+# Not part of the cache identity. Follows a Slurm allocation when there is one.
+THREADS = int(os.environ.get("PR_GAPS_THREADS") or os.environ.get("SLURM_CPUS_PER_TASK") or 16)
 CHUNK_SIZE = 1_000_000
 
 # Step 2: gaps
