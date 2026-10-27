@@ -123,6 +123,20 @@ plan <- plan[plan$product == "dtm" | grepl("_c[45]r2[.]las[.]gz$", plan$name), ]
 gl_run_download(plan, dry_run = FALSE)
 ```
 
+**Older Linux systems (`GLIBCXX_3.4.32' not found`).** The Linux CloudComPy wheel needs
+the C++ runtime from GCC 13.2 or newer. RHEL/Rocky 8-era clusters ship an older
+`/lib64/libstdc++.so.6`. Either use an existing conda-based CloudComPy environment (it
+ships its own runtime), or put a newer runtime first on the library path, both when
+checking and in every job script:
+
+```bash
+module load gcc/13.2.0   # or any GCC >= 13.2 that 'module avail gcc' lists
+export LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so.6)"):$LD_LIBRARY_PATH"
+```
+
+Without a suitable module, `micromamba create -p ~/libstdcxx -c conda-forge 'libstdcxx>=13.2'`
+followed by `export LD_LIBRARY_PATH=~/libstdcxx/lib:$LD_LIBRARY_PATH` does the same.
+
 ### EV1 on a Linux HPC
 
 ```bash

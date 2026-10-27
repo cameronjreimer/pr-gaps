@@ -80,6 +80,8 @@ if [[ -e "$VENV" ]]; then
     echo "Removing old environment: $VENV"
     rm -rf "$VENV"
 fi
+# uv's installer puts it here, but only shells started after the install have it on PATH.
+PATH="$HOME/.local/bin:$PATH"
 if command -v uv >/dev/null 2>&1; then
     uv venv --python "$PY_VERSION" "$VENV"
     uv pip install --python "$PY" "$WHEEL" -r "$HERE/requirements.txt"
@@ -89,10 +91,15 @@ elif command -v "python$PY_VERSION" >/dev/null 2>&1; then
     "$PY" -m pip install "$WHEEL" -r "$HERE/requirements.txt"
 else
     cat >&2 <<EOF
-Neither uv nor python$PY_VERSION is available. Install uv, which fetches Python
-itself, into your home directory and re-run:
+Neither uv nor python$PY_VERSION is available. Either:
 
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  - install uv, which fetches Python itself, into your home directory, then re-run:
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+    (on a small home quota, first set UV_CACHE_DIR and UV_PYTHON_INSTALL_DIR
+    to a larger filesystem);
+  - load a Python $PY_VERSION module ('module avail python'), then re-run; or
+  - download the CloudComPy wheel built for a Python you already have
+    (cp310-cp314) into python/wheels/, then re-run.
 EOF
     exit 1
 fi

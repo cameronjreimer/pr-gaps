@@ -42,6 +42,14 @@ def main():
         cc = canopy.import_cloudcompy()
     except RuntimeError as exc:
         print(f"FAIL: {exc}\n  cause: {exc.__cause__!r}")
+        if "GLIBCXX" in str(exc.__cause__):
+            print(
+                "  The system C++ runtime is older than the one the CloudComPy wheel was\n"
+                "  built against (GCC 13.2+). Put a newer libstdc++.so.6 first on\n"
+                "  LD_LIBRARY_PATH, e.g. after 'module load gcc/13.2.0' (or newer):\n"
+                '    export LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so.6)"):$LD_LIBRARY_PATH"\n'
+                "  or from conda-forge 'libstdcxx>=13.2'. See python/README.md."
+            )
         return 1
     print(f"  cloudComPy {getattr(cc, '__version__', 'imported')}")
 
