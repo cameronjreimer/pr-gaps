@@ -2,6 +2,7 @@
 # ignore a local one anyway in case it is ever pointed here.
 /data/
 *.log
+*.out
 
 # R session stuff
 .Rhistory
