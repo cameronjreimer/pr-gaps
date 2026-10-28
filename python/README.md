@@ -58,6 +58,7 @@ reference, so edge points are compared with their true nearest neighbours.
 | `PR_GAPS_GLIHT` | `$PR_GAPS_DATA/raw/gliht` | campaign directories in server layout. On the server: `/ibstorage/shared/PR_NASA_GLiHT` |
 | `PR_GAPS_SITE` | `lfdp` | which entry of `SITES` to run, if the `SITE` line isn't edited |
 | `PR_GAPS_DTM` | the site's DTM: `$PR_GAPS_GLIHT/PR_5March2017_EV1/lidar/geotiff/PR_5March2017_EV1_DTM.tif` for `lfdp`/`ev1` | replaces the selected site's DTM path; it must be the unpacked `.tif` |
+| `PR_GAPS_CONNECTIVITY` | `26` | gap connectivity, `26` (faces, edges, corners) or `6` (faces only). A step-2 setting: the distance cache is reused, and each value gets its own `gaps/<run-id>/` |
 | `PR_GAPS_THREADS` | `$SLURM_CPUS_PER_TASK`, else 16 | C2C threads; not part of the cache identity |
 | `PR_GAPS_SCRATCH` | `/workdir/ogh6/tmp` | where `.laz.gz` expands; used only if it exists |
 

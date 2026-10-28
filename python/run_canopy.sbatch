@@ -2,6 +2,7 @@
 # Slurm job for canopy.py. Submit from the repository root (pr-gaps/):
 #
 #   sbatch python/run_canopy.sbatch ev1      # site: lfdp (default), ev1, fia12
+#   PR_GAPS_CONNECTIVITY=6 sbatch python/run_canopy.sbatch ev1   # faces-only gaps
 #
 # Edit the two paths below (or export them before sbatch, which passes your
 # environment on). The log is written to <job-name>-<jobid>.out in the submit

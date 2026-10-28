@@ -143,7 +143,11 @@ CHUNK_SIZE = 1_000_000
 # Step 2: gaps
 VOXEL_SIZE = 1.0
 GRID_ORIGIN = (0.0, 0.0, 0.0)
-CONNECTIVITY = 26  # 26 = faces, edges and corners touch; 6 = faces only
+# 26 = faces, edges and corners touch; 6 = faces only. PR_GAPS_CONNECTIVITY overrides.
+CONNECTIVITY = os.environ.get("PR_GAPS_CONNECTIVITY") or "26"
+if CONNECTIVITY not in ("6", "26"):
+    raise SystemExit(f"PR_GAPS_CONNECTIVITY must be 6 or 26, not {CONNECTIVITY!r}")
+CONNECTIVITY = int(CONNECTIVITY)
 MIN_POINTS = 10
 MIN_VOLUME = 0.0  # m3 of occupied voxels
 MIN_VOXEL_POINTS = 1
