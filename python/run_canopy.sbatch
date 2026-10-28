@@ -3,6 +3,7 @@
 #
 #   sbatch python/run_canopy.sbatch ev1      # site: lfdp (default), ev1, fia12
 #   PR_GAPS_CONNECTIVITY=6 sbatch python/run_canopy.sbatch ev1   # faces-only gaps
+#   PR_GAPS_SEED_THRESHOLD=5 sbatch python/run_canopy.sbatch ev1 # split 2 m gaps around 5 m cores
 #
 # Edit the two paths below (or export them before sbatch, which passes your
 # environment on). The log is written to <job-name>-<jobid>.out in the submit

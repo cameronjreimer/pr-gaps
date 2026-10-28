@@ -153,6 +153,15 @@ MIN_VOLUME = 0.0  # m3 of occupied voxels
 MIN_VOXEL_POINTS = 1
 EXCLUDE_CLASSES = [2, 7, 18]  # ground, low noise, high noise
 MIN_HEIGHT = None  # m above ground; needs a DTM
+# Seeded split: at thresholds below this, gaps are split around the gaps found at this
+# threshold (each changed voxel joins the core it reaches in fewest steps). None = off.
+# PR_GAPS_SEED_THRESHOLD overrides, e.g. 5.
+SEED_THRESHOLD = os.environ.get("PR_GAPS_SEED_THRESHOLD") or None
+if SEED_THRESHOLD is not None:
+    try:
+        SEED_THRESHOLD = float(SEED_THRESHOLD)
+    except ValueError:
+        raise SystemExit(f"PR_GAPS_SEED_THRESHOLD must be a number of metres, not {SEED_THRESHOLD!r}")
 OUTPUT = None  # None = runs/<site>/gaps/<run-id>
 
 
@@ -1148,14 +1157,117 @@ def label_voxels(voxels, connectivity=26):
     Search only the positive half-neighborhood. Sparse storage scales with
     occupied cells and their adjacency, never with the world bounding volume.
     """
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
-
-    if connectivity not in (6, 26):
-        raise ValueError("connectivity must be 6 or 26")
     n = len(voxels)
     if not n:
         return np.empty(0, dtype=np.uint32)
+    source, target = voxel_edges(voxels, connectivity)
+    return _components(n, source, target)
+
+
+def _components(n, source, target):
+    """Connected components of n cells joined by edges, numbered 1.. by first cell."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    if not source.size:
+        if n > np.iinfo(np.uint32).max:
+            raise ValueError("too many objects for uint32 object IDs")
+        return np.arange(1, n + 1, dtype=np.uint32)
+    graph = coo_matrix(
+        (np.ones(len(source), dtype=np.uint8), (source, target)), shape=(n, n)
+    ).tocsr()
+    _, labels = connected_components(graph, directed=False, return_labels=True)
+    return _number_by_first_cell(labels)
+
+
+def _number_by_first_cell(labels):
+    """Renumber arbitrary group labels 1.. in order of each group's first cell."""
+    groups, labels = np.unique(labels, return_inverse=True)
+    if len(groups) > np.iinfo(np.uint32).max:
+        raise ValueError("too many objects for uint32 object IDs")
+    first = np.full(len(groups), len(labels), dtype=np.int64)
+    np.minimum.at(first, labels, np.arange(len(labels)))
+    remap = np.empty(len(groups), dtype=np.uint32)
+    remap[np.argsort(first)] = np.arange(1, len(groups) + 1, dtype=np.uint32)
+    return remap[labels]
+
+
+def grow_from_seeds(n, source, target, seeds):
+    """Assign cells to the seed they reach in the fewest steps along the edges.
+
+    seeds holds a positive seed id per seed cell and 0 elsewhere. Growth runs
+    breadth-first from every seed at once, so a cell joins the nearest seed by
+    path length through changed cells; ties go to the lowest seed id, so the
+    result is deterministic. Cells no seed reaches stay 0.
+    """
+    from scipy.sparse import coo_matrix
+
+    labels = np.asarray(seeds, dtype=np.int64).copy()
+    if not source.size:
+        return labels
+    rows = np.concatenate((source, target))
+    graph = coo_matrix(
+        (np.ones(len(rows), dtype=np.uint8), (rows, np.concatenate((target, source)))),
+        shape=(n, n),
+    ).tocsr()
+    indptr, neighbours = graph.indptr, graph.indices
+    frontier = np.flatnonzero(labels > 0)
+    while frontier.size:
+        starts = indptr[frontier]
+        counts = indptr[frontier + 1] - starts
+        within = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
+        reached = neighbours[np.repeat(starts, counts) + within]
+        offered = np.repeat(labels[frontier], counts)
+        new = labels[reached] == 0
+        reached, offered = reached[new], offered[new]
+        if not reached.size:
+            break
+        order = np.lexsort((offered, reached))
+        reached, offered = reached[order], offered[order]
+        first = np.concatenate(([True], reached[1:] != reached[:-1]))
+        labels[reached[first]] = offered[first]
+        frontier = reached[first]
+    return labels
+
+
+def seeded_components(voxels, connectivity, seed_points, *, min_points, min_volume, cell_volume):
+    """Split connected gaps around cores of stronger change; return labels 1.. per cell.
+
+    Seed cells are those with enough returns at or above the seed threshold
+    (seed_points >= 1 marks them; the caller applies min_voxel_points). They are
+    grouped into seed gaps exactly as a run at the seed threshold would group
+    them (same connectivity, min_points on seed returns, min_volume), then every
+    other cell joins the seed gap it reaches in the fewest steps through
+    changed cells. Cells connected to no seed gap keep their ordinary component.
+    """
+    n = len(voxels)
+    if not n:
+        return np.empty(0, dtype=np.uint32)
+    source, target = voxel_edges(voxels, connectivity)
+    is_seed = seed_points > 0
+    seeds = np.zeros(n, dtype=np.int64)
+    if is_seed.any():
+        seed_rows = np.flatnonzero(is_seed)
+        # Sorted subset of sorted cells, so the seed grid labels like a seed-threshold run.
+        seed_labels = label_voxels(voxels[seed_rows], connectivity).astype(np.int64)
+        count = int(seed_labels.max())
+        seed_points_per = np.bincount(seed_labels, weights=seed_points[seed_rows], minlength=count + 1)
+        seed_cells = np.bincount(seed_labels, minlength=count + 1)
+        valid = (seed_points_per >= min_points) & (seed_cells * cell_volume >= min_volume)
+        valid[0] = False
+        seeds[seed_rows] = np.where(valid[seed_labels], seed_labels, 0)
+    grown = grow_from_seeds(n, source, target, seeds)
+    ordinary = _components(n, source, target).astype(np.int64)
+    # Unreached cells keep their ordinary component, numbered past every seed id.
+    labels = np.where(grown > 0, grown, ordinary + int(seeds.max()))
+    return _number_by_first_cell(labels)
+
+
+def voxel_edges(voxels, connectivity=26):
+    """Edges between sorted, unique cells over the positive half-neighbourhood."""
+    if connectivity not in (6, 26):
+        raise ValueError("connectivity must be 6 or 26")
+    n = len(voxels)
     keys = row_keys(np.ascontiguousarray(voxels, dtype=np.int64))
     previous, following = voxels[:-1], voxels[1:]
     ordered = (
@@ -1184,23 +1296,9 @@ def label_voxels(voxels, connectivity=26):
             starts.append(valid)
             ends.append(indices[valid])
     if not starts:
-        if n > np.iinfo(np.uint32).max:
-            raise ValueError("too many objects for uint32 object IDs")
-        return np.arange(1, n + 1, dtype=np.uint32)
-    source, target = np.concatenate(starts), np.concatenate(ends)
-    graph = coo_matrix(
-        (np.ones(len(source), dtype=np.uint8), (source, target)), shape=(n, n)
-    ).tocsr()
-    n_components, labels = connected_components(
-        graph, directed=False, return_labels=True
-    )
-    if n_components > np.iinfo(np.uint32).max:
-        raise ValueError("too many objects for uint32 object IDs")
-    first = np.full(n_components, n, dtype=np.int64)
-    np.minimum.at(first, labels, np.arange(n))
-    remap = np.empty(n_components, dtype=np.uint32)
-    remap[np.argsort(first)] = np.arange(1, n_components + 1, dtype=np.uint32)
-    return remap[labels]
+        empty = np.empty(0, dtype=np.int64)
+        return empty, empty
+    return np.concatenate(starts), np.concatenate(ends)
 
 
 CUBE = np.array([[x, y, z] for x in (0, 1) for y in (0, 1) for z in (0, 1)], float)
@@ -1243,12 +1341,15 @@ def analyze_threshold(
     min_voxel_points=1,
     exclude_classes=(2, 7, 18),
     min_height=None,
+    seed_threshold=None,
     eligibility=None,
     candidates=None,
 ):
     """Return point labels and typed sparse voxel/component tables for one cut.
 
     indices holds voxel cells for the candidates rows (every point when omitted).
+    With seed_threshold above this cut, gaps are split around the gaps found at
+    seed_threshold (seeded_components); otherwise they are plain components.
     """
     xyz, distances = arrays["xyz"], arrays["c2c"]
     point_labels = np.zeros(len(xyz), dtype=np.uint32)
@@ -1284,12 +1385,21 @@ def analyze_threshold(
     if not len(occupied):
         return empty
 
-    component = label_voxels(occupied, connectivity).astype(np.int64) - 1
+    cell_volume = float(voxel_size) ** 3
+    if seed_threshold is not None and seed_threshold > threshold:
+        strong = distances[selected] >= seed_threshold
+        seed_points = np.bincount(point_voxel[strong], minlength=len(occupied))
+        seed_points[seed_points < min_voxel_points] = 0
+        component = seeded_components(
+            occupied, connectivity, seed_points,
+            min_points=min_points, min_volume=min_volume, cell_volume=cell_volume,
+        ).astype(np.int64) - 1
+    else:
+        component = label_voxels(occupied, connectivity).astype(np.int64) - 1
     n_components = int(component.max()) + 1
     n_voxels = np.bincount(component, minlength=n_components).astype(np.uint64)
     n_points = np.zeros(n_components, dtype=np.uint64)
     np.add.at(n_points, component, counts.astype(np.uint64))
-    cell_volume = float(voxel_size) ** 3
     volumes = n_voxels.astype(np.float64) * cell_volume
     keep = (n_points >= min_points) & (volumes >= min_volume)
     if not np.any(keep):
@@ -1441,6 +1551,7 @@ def _config(
     min_voxel_points,
     exclude_classes,
     min_height,
+    seed_threshold=None,
 ):
     thresholds = sorted(set(float(t) for t in thresholds))
     if not thresholds or any(not np.isfinite(t) or t < 0 for t in thresholds):
@@ -1467,7 +1578,12 @@ def _config(
         raise ValueError("min-height must be finite")
     if any(int(c) != c or not 0 <= c <= 255 for c in exclude_classes):
         raise ValueError("exclude-classes must contain integers from 0 through 255")
+    if seed_threshold is not None and (not np.isfinite(seed_threshold) or seed_threshold <= 0):
+        raise ValueError("seed-threshold must be finite and positive")
+    # Only present when used, so runs without a seeded split keep their run IDs.
+    seeding = {} if seed_threshold is None else {"seed_threshold": float(seed_threshold)}
     return {
+        **seeding,
         "thresholds": thresholds,
         "voxel_size": float(voxel_size),
         "grid_origin": [float(v) for v in grid_origin],
@@ -1578,6 +1694,7 @@ def analyze_cache(
     min_voxel_points=1,
     exclude_classes=(2, 7, 18),
     min_height=None,
+    seed_threshold=None,
 ):
     """Save numerical results per threshold; resume missing exports on retry."""
     config = _config(
@@ -1590,6 +1707,7 @@ def analyze_cache(
         min_voxel_points,
         exclude_classes,
         min_height,
+        seed_threshold,
     )
     cache = Path(cache).expanduser().resolve()
     manifest, arrays = load_cache(cache, provenance=False)
@@ -1626,6 +1744,14 @@ def analyze_cache(
         "measurement": MEASUREMENT,
         "vertical_observation": "not_established",
         "scientific_description": "Union of fixed-grid voxels supported by eligible pre-epoch returns whose one-way nearest-neighbor separation meets the threshold.",
+        "segmentation": (
+            f"{config['connectivity']}-connected components"
+            if "seed_threshold" not in config
+            else f"seeded split below {config['seed_threshold']:g} m: voxels join the "
+            f"{config['seed_threshold']:g} m gap they reach in fewest "
+            f"{config['connectivity']}-connected steps; voxels reaching none keep "
+            "their connected component"
+        ),
         "limitations": [
             "Changed-return support is not confirmed empty canopy volume, wood volume, biomass, or a causal attribution of vegetation loss.",
             "Common XY return coverage is necessary support, not proof of vertical visibility or equal sampling density.",
@@ -1784,8 +1910,9 @@ def main():
         grid_origin=GRID_ORIGIN, connectivity=CONNECTIVITY, min_points=MIN_POINTS,
         min_volume=MIN_VOLUME, min_voxel_points=MIN_VOXEL_POINTS,
         exclude_classes=EXCLUDE_CLASSES, min_height=MIN_HEIGHT,
+        seed_threshold=SEED_THRESHOLD,
     )
-    print(f"Gaps {run['run_id']}: {run['output']}")
+    print(f"Gaps {run['run_id']}: {run['output']} ({run['segmentation']})")
     print(f"Ground pre-to-post C2C: {run['ground_separation']}")
     print((Path(run["output"]) / "summary.csv").read_text(), end="")
     stamp("done")

@@ -59,11 +59,48 @@ reference, so edge points are compared with their true nearest neighbours.
 | `PR_GAPS_SITE` | `lfdp` | which entry of `SITES` to run, if the `SITE` line isn't edited |
 | `PR_GAPS_DTM` | the site's DTM: `$PR_GAPS_GLIHT/PR_5March2017_EV1/lidar/geotiff/PR_5March2017_EV1_DTM.tif` for `lfdp`/`ev1` | replaces the selected site's DTM path; it must be the unpacked `.tif` |
 | `PR_GAPS_CONNECTIVITY` | `26` | gap connectivity, `26` (faces, edges, corners) or `6` (faces only). A step-2 setting: the distance cache is reused, and each value gets its own `gaps/<run-id>/` |
+| `PR_GAPS_SEED_THRESHOLD` | unset (off) | seeded split, e.g. `5`: at thresholds below it, gaps are split around the gaps found at it (see below). A step-2 setting; each value gets its own `gaps/<run-id>/` |
 | `PR_GAPS_THREADS` | `$SLURM_CPUS_PER_TASK`, else 16 | C2C threads; not part of the cache identity |
 | `PR_GAPS_SCRATCH` | `/workdir/ogh6/tmp` | where `.laz.gz` expands; used only if it exists |
 
 Outputs go to `$PR_GAPS_DATA/runs/canopy/<site>/`: the distance cache in `cache/`, and
 `gaps/<run-id>/threshold_<t>m/` per gap run. Nothing is written into the repository.
+
+## Seeded split
+
+At low thresholds, changed voxels form one connected web across much of the canopy. At
+LFDP at 2 m, one 26-connected gap holds 35% of all gap volume, and in plan view nearly
+10 ha of the 25 ha is one patch. Setting `PR_GAPS_SEED_THRESHOLD=5` splits that web
+around the 5 m gaps:
+
+1. **Cores.** The 5 m gaps are found inside the 2 m voxels exactly as a 5 m run would
+   find them: same connectivity, `MIN_POINTS` counted on ≥ 5 m returns, `MIN_VOLUME`.
+2. **Growth.** Every other 2 m voxel joins the core it reaches in the fewest steps
+   through changed voxels. Growth runs from all cores at once, and ties go to the
+   lower-numbered core, so the result is deterministic.
+3. **Leftovers.** 2 m voxels connected to no core keep their ordinary connected component.
+   The usual `MIN_POINTS`/`MIN_VOLUME` filters then apply to every gap.
+
+So each gap is a core of severe loss plus the weaker change around it. Each 5 m gap ends
+up whole in exactly one 2 m gap, and no 2 m gap holds two. Thresholds at or above the seed
+are unaffected. Where two cores' halos meet, the boundary falls midway between them, which
+is a convention rather than something the data show. Report it as such, and treat the
+split as one gap definition among the alternatives for the size distribution.
+
+LFDP at 2 m:
+
+| | Gaps | Largest | Gap volume attached to a 5 m core |
+|---|---|---|---|
+| 26-connected | 2,131 | 35.1% of gap volume | – |
+| 6-connected | 4,176 | 8.7% | – |
+| seeded, 26-connected | 2,540 | 1.3% | 84% |
+| seeded, 6-connected | 4,595 | 1.3% | 74% |
+
+```bash
+PR_GAPS_SEED_THRESHOLD=5 sbatch -J canopy-ev1-seed python/run_canopy.sbatch ev1
+```
+
+Each run's `run.json` records the rule under `segmentation`.
 
 ## Environment
 
