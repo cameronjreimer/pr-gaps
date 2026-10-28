@@ -93,11 +93,13 @@ SITES = {
         thresholds=[2, 5],
     ),
     # The whole EV1 block, 5 Mar 2017 -> 25 Apr 2018: 24 and 22 tiles, 384 M and
-    # 327 M points. One untiled run; see python/README.md for memory and disk.
+    # 327 M points. One untiled run; see python/README.md for memory and disk. The
+    # study area is where both flights have data (make_overlap_area.py): without it,
+    # 2017 points hundreds of metres from any 2018 return stalled the uncapped C2C.
     "ev1": dict(
         pre=[f"{EV1_2017}/lidar/las"],
         post=[f"{EV1_2018}/lidar/las"],
-        study_area=None,
+        study_area=DATA / "interim" / "sites" / "ev1" / "ev1_overlap.gpkg",
         dtm=EV1_DTM,
         thresholds=[2, 5],
     ),

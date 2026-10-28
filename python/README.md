@@ -19,10 +19,18 @@ editing the file. The default is `lfdp`.
 | Site | Pre (5 Mar 2017) | Post | Study area | DTM | Thresholds |
 |---|---|---|---|---|---|
 | `lfdp` | `PR_5March2017_EV1` tiles `c4r2`, `c5r2` | `PR_25April2018_EV1` same tiles | `$PR_GAPS_DATA/interim/sites/lfdp/lfdp_buf50.gpkg`: plot + 50 m (25.05 ha) | 2017 EV1 | 2 m, 5 m |
-| `ev1` | all 24 `PR_5March2017_EV1` tiles (384 M points) | all 22 `PR_25April2018_EV1` tiles (327 M) | none: whole tiles, clipped to both-flights coverage | 2017 EV1 | 2 m, 5 m |
+| `ev1` | all 24 `PR_5March2017_EV1` tiles (384 M points) | all 22 `PR_25April2018_EV1` tiles (327 M) | `$PR_GAPS_DATA/interim/sites/ev1/ev1_overlap.gpkg`: where both flights' CHMs have data (926 ha), from `make_overlap_area.py` | 2017 EV1 | 2 m, 5 m |
 | `fia12` | `PR_11March2017_FIA12` (23 tiles) | `PR_2May018_FIA12` | none | none | 5 m |
 
 Each site gets its own cache and gap runs under `$PR_GAPS_DATA/runs/canopy/<site>/`.
+
+**Keep 2017 points near 2018 data.** The C2C search has no distance cap, so a 2017 point
+far from every 2018 return makes CloudComPy search through all the empty space in
+between. The first untiled `ev1` run had no study area: 28% of the 2017 area has no
+2018 data, 176 ha of it more than 500 m away. It spent 3.5 h+ in C2C without finishing,
+after about 40 min for everything else. Clip `pre` to the flights' overlap
+(`make_overlap_area.py PRE POST OUTPUT`). This changes no gap, because the coverage mask
+drops those points anyway.
 
 The plot falls in tiles `c4r2`/`c5r2` of both EV1 flights (`derived/inventory/pr_footprints.gpkg`,
 layer `tiles`). The same tiles cover it in `PR_15March2017_EV1` (c4r2 only holds data) and
