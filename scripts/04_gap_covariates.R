@@ -91,8 +91,10 @@ gl_msg(sprintf("site %s, run %s: %d threshold(s)", site, run, length(gap_files))
 ## One raster per G-LiHT product. Campaigns are unpacked either to a single
 ## <campaign>_<P>.tif or to a <campaign>_<P>/ folder of strips plus a mosaic;
 ## use the mosaic when there is one, else stitch the strips with a VRT.
+## PR_GAPS_GLIHT points elsewhere on the server, as it does for canopy.py.
+gliht_root <- Sys.getenv("PR_GAPS_GLIHT", file.path(data_root, "raw", "gliht"))
 gliht_raster <- function(campaign, product) {
-  dir <- file.path(data_root, "raw", "gliht", campaign, "lidar", "geotiff")
+  dir <- file.path(gliht_root, campaign, "lidar", "geotiff")
   single <- file.path(dir, sprintf("%s_%s.tif", campaign, product))
   if (file.exists(single)) return(rast(single))
   tifs <- list.files(file.path(dir, sprintf("%s_%s", campaign, product)),
