@@ -24,6 +24,8 @@
 ##   (flags combine, e.g. --download --reproject --figures; --reproject needs
 ##    terra and sf, --figures also ggplot2, ggspatial, ragg, stringr, viridisLite)
 ##   Figures go to derived/covariates/figures/.
+##   Rscript scripts/03_download_covars.R --rugosity     # canopy rugosity per site
+##   (from each site's 2017 G-LiHT CHM; see R/ingest/08_gliht_rasters.R)
 ##
 ## Restartable: files already present are skipped. Exits 1 if any file failed.
 ## ---------------------------------------------------------------------------
@@ -142,9 +144,10 @@ do_download  <- "--download" %in% args
 do_reproject <- "--reproject" %in% args
 do_register  <- do_download || "--register" %in% args
 do_figures   <- "--figures" %in% args
-if (!do_download && !do_reproject && !do_register && !do_figures) {
+do_rugosity  <- "--rugosity" %in% args
+if (!do_download && !do_reproject && !do_register && !do_figures && !do_rugosity) {
   print(COVAR_FILES[, c("layer", "name")], row.names = FALSE)
-  gl_msg("dry run — add --download to fetch, --reproject to harmonize, --figures to map")
+  gl_msg("dry run — add --download to fetch, --reproject to harmonize, --rugosity, --figures to map")
   quit(status = 0)
 }
 
@@ -348,6 +351,29 @@ if (do_reproject) {
   gl_msg(sprintf("reproject done: %d failed", n_harmonize_failed))
 }
 
+## --- Canopy rugosity ---------------------------------------------------------
+## SD of 2017 CHM heights above 2 m in a 41 m moving window (Han et al. 2026;
+## R/ingest/08_gliht_rasters.R), one raster per 2017 campaign in
+## SITE_CAMPAIGN_2017, kept in the CHM's own CRS and 1 m grid. Skipped if the
+## output exists (delete it to redo) or the campaign's CHM is not on disk.
+n_rugosity_failed <- 0L
+if (do_rugosity) {
+  stopifnot(requireNamespace("terra", quietly = TRUE))
+  for (campaign in unique(SITE_CAMPAIGN_2017)) {
+    dest <- gl_rugosity_path(campaign)
+    if (file.exists(dest)) { gl_msg("held: ", basename(dest)); next }
+    chm <- tryCatch(gl_gliht_raster(campaign, "CHM"), error = function(e) NULL)
+    if (is.null(chm)) { gl_msg("no 2017 CHM for ", campaign, " — skipped"); next }
+    gl_msg("rugosity: ", campaign)
+    dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+    partial <- sub("[.]tif$", ".part.tif", dest)  # rename on success
+    ok <- !is.null(gl_try(gl_canopy_rugosity(chm, filename = partial), campaign))
+    if (ok) file.rename(partial, dest) else {
+      unlink(partial); n_rugosity_failed <- n_rugosity_failed + 1L
+    }
+  }
+}
+
 ## --- Figures -----------------------------------------------------------------
 ## One map per harmonized layer, from interim/, with class legends or colour
 ## bars. Written to derived/covariates/figures/ (small, so it can be committed).
@@ -365,4 +391,5 @@ if (do_figures) {
   gl_msg(sprintf("figures done: %d failed", n_map_failed))
 }
 
-quit(status = if (length(failed) || n_harmonize_failed || n_map_failed) 1 else 0)
+quit(status = if (length(failed) || n_harmonize_failed || n_map_failed ||
+                   n_rugosity_failed) 1 else 0)

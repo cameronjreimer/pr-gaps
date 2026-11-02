@@ -16,6 +16,9 @@
 ##     slope_deg           slope                      mean of cells
 ##     aspect_deg          aspect                     circular mean, 0-360
 ##     chm_mean_m/_max_m   CHM (pre-Maria canopy)     mean / max of cells
+##     rugosity_m          CHM rugosity, 41 m window  mean of cells
+##                         (interim/covariates/rugosity/, from --rugosity in
+##                          03_download_covars.R; Han et al. 2026 method)
 ##
 ## Cells are terra::extract()'s default: those whose centre falls in the gap,
 ## and for a gap smaller than a cell (the median gap is ~8 m^2), the cell it
@@ -60,17 +63,10 @@ get_arg <- function(flag, default = NULL) {
 }
 
 ## --- Which site, run and 2017 rasters ---------------------------------------
-## The 2017 (pre-Maria) G-LiHT campaign whose DTM/slope/aspect/CHM cover each
-## site in canopy.py's SITES. Add a row when a new site is run.
-SITE_CAMPAIGN_2017 <- c(
-  lfdp  = "PR_5March2017_EV1",
-  ev1   = "PR_5March2017_EV1",
-  fia12 = "PR_11March2017_FIA12"
-)
-
+## Site -> 2017 campaign table, and the raster finder: R/ingest/08_gliht_rasters.R.
 site <- get_arg("--site", "lfdp")
 if (!site %in% names(SITE_CAMPAIGN_2017)) {
-  stop("unknown --site ", site, "; add it to SITE_CAMPAIGN_2017")
+  stop("unknown --site ", site, "; add it to SITE_CAMPAIGN_2017 in R/ingest/08_gliht_rasters.R")
 }
 data_root <- gl_data_root()
 gl_msg("data root: ", data_root)
@@ -88,26 +84,17 @@ gap_files <- Sys.glob(file.path(runs_dir, run, "threshold_*m", "gaps.gpkg"))
 if (!length(gap_files)) stop("no threshold_*m/gaps.gpkg in ", file.path(runs_dir, run))
 gl_msg(sprintf("site %s, run %s: %d threshold(s)", site, run, length(gap_files)))
 
-## One raster per G-LiHT product. Campaigns are unpacked either to a single
-## <campaign>_<P>.tif or to a <campaign>_<P>/ folder of strips plus a mosaic;
-## use the mosaic when there is one, else stitch the strips with a VRT.
-## PR_GAPS_GLIHT points elsewhere on the server, as it does for canopy.py.
-gliht_root <- Sys.getenv("PR_GAPS_GLIHT", file.path(data_root, "raw", "gliht"))
-gliht_raster <- function(campaign, product) {
-  dir <- file.path(gliht_root, campaign, "lidar", "geotiff")
-  single <- file.path(dir, sprintf("%s_%s.tif", campaign, product))
-  if (file.exists(single)) return(rast(single))
-  tifs <- list.files(file.path(dir, sprintf("%s_%s", campaign, product)),
-                     pattern = "[.]tif$", full.names = TRUE)
-  mosaic <- tifs[grepl("_mosaic_", basename(tifs))]
-  if (length(mosaic)) return(rast(mosaic[1]))
-  if (length(tifs)) return(vrt(tifs))
-  stop("no ", product, " raster for ", campaign, " under ", dir,
-       " — download it with scripts/02_download.R")
-}
 campaign <- SITE_CAMPAIGN_2017[[site]]
 gliht <- lapply(c(dtm = "DTM", slope = "slope", aspect = "aspect", chm = "CHM"),
-                function(p) gliht_raster(campaign, p))
+                function(p) gl_gliht_raster(campaign, p))
+
+## Canopy rugosity, prepared from the same CHM by 03_download_covars.R --rugosity.
+rugosity_file <- gl_rugosity_path(campaign)
+if (!file.exists(rugosity_file)) {
+  stop("no rugosity raster ", rugosity_file,
+       " — run scripts/03_download_covars.R --rugosity")
+}
+gliht$rugosity <- rast(rugosity_file)
 
 ## Interim covariates (ADR 008).
 interim <- file.path(data_root, "interim", "covariates")
@@ -221,6 +208,7 @@ for (gap_file in gap_files) {
     aspect_deg = circular_mean(cells(gliht$aspect, gaps_gliht), n),
     chm_mean_m = weighted_mean(chm, n),
     chm_max_m  = cell_max(chm, n),
+    rugosity_m = weighted_mean(cells(gliht$rugosity, gaps_gliht), n),
     stringsAsFactors = FALSE
   )
 
