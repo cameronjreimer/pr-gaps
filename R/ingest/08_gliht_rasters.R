@@ -86,6 +86,42 @@ gl_canopy_rugosity <- function(chm, window = RUGOSITY_WINDOW_M,
   out
 }
 
+## Every pre-Maria (2017) campaign folder under the G-LiHT root, plus the
+## gap-analysis sites' campaigns. "_all" pre-merged mosaics are left out: they
+## duplicate the dated flights (see MOSAIC_PATTERN in 00_config.R).
+gl_campaigns_2017 <- function() {
+  dirs <- basename(list.dirs(gl_gliht_root(), recursive = FALSE))
+  dirs <- dirs[grepl(CAMPAIGN_INCLUDE, dirs) & !grepl(MOSAIC_PATTERN, dirs)]
+  parsed <- gl_parse_campaign_name(dirs)
+  sort(unique(c(dirs[!is.na(parsed$year) & parsed$year == 2017],
+                unname(SITE_CAMPAIGN_2017))))
+}
+
+## The 2017 CHM to compute rugosity from. Prefers the unpacked raster (what
+## 02_download.R leaves), and falls back to the packed archive as the G-LiHT
+## server publishes it (<campaign>_CHM.tif.gz or .tar.gz), unpacked into
+## `workdir` — the caller deletes that afterwards. NULL if there is neither.
+gl_chm_for_rugosity <- function(campaign, workdir) {
+  chm <- tryCatch(gl_gliht_raster(campaign, "CHM"), error = function(e) NULL)
+  if (!is.null(chm)) return(chm)
+
+  dir <- file.path(gl_gliht_root(), campaign, "lidar", "geotiff")
+  packed <- file.path(dir, paste0(campaign, c("_CHM.tif.gz", "_CHM.tar.gz")))
+  packed <- packed[file.exists(packed)]
+  if (!length(packed)) return(NULL)
+
+  dir.create(workdir, recursive = TRUE, showWarnings = FALSE)
+  if (grepl("[.]tif[.]gz$", packed[1])) {
+    tif <- file.path(workdir, sub("[.]gz$", "", basename(packed[1])))
+    gl_gunzip(packed[1], tif)                       # 01_http.R
+    return(terra::rast(tif))
+  }
+  gl_extract(packed[1], workdir)                    # 01_http.R
+  tifs <- list.files(workdir, pattern = "[.]tif$", recursive = TRUE, full.names = TRUE)
+  mosaic <- tifs[grepl("_mosaic_", basename(tifs))]
+  if (length(mosaic)) terra::rast(mosaic[1]) else if (length(tifs)) terra::vrt(tifs) else NULL
+}
+
 ## Where a campaign's rugosity raster lives. It stays in the campaign's own CRS
 ## and 1 m grid (unlike the EPSG:32161 interim layers): 04_gap_covariates.R
 ## samples it alongside the CHM it came from, so reprojecting would only blur it.

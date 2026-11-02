@@ -1,0 +1,15 @@
+{
+  "runs": {
+    "6": {
+      "output": "C:\\Users\\camer\\Projects\\G-LIHT\\data\\runs\\canopy\\lfdp\\gaps\\fc2811e5f3ddf6bd",
+      "run_id": "fc2811e5f3ddf6bd34c8fdf064f0cf8197fce83bd8998fe896eab704b848777c",
+      "segmentation": "6-connected components"
+    },
+    "26": {
+      "output": "C:\\Users\\camer\\Projects\\G-LIHT\\data\\runs\\canopy\\lfdp\\gaps\\6dc2499bff8f73cf",
+      "run_id": "6dc2499bff8f73cfc7592fbeba7332326572450926461382be3dc8e986aeecae",
+      "segmentation": "26-connected components"
+    }
+  },
+  "site": "lfdp"
+}

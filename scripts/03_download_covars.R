@@ -24,7 +24,7 @@
 ##   (flags combine, e.g. --download --reproject --figures; --reproject needs
 ##    terra and sf, --figures also ggplot2, ggspatial, ragg, stringr, viridisLite)
 ##   Figures go to derived/covariates/figures/.
-##   Rscript scripts/03_download_covars.R --rugosity     # canopy rugosity per site
+##   Rscript scripts/03_download_covars.R --rugosity     # canopy rugosity, every 2017 campaign
 ##   (from each site's 2017 G-LiHT CHM; see R/ingest/08_gliht_rasters.R)
 ##
 ## Restartable: files already present are skipped. Exits 1 if any file failed.
@@ -353,25 +353,71 @@ if (do_reproject) {
 
 ## --- Canopy rugosity ---------------------------------------------------------
 ## SD of 2017 CHM heights above 2 m in a 41 m moving window (Han et al. 2026;
-## R/ingest/08_gliht_rasters.R), one raster per 2017 campaign in
-## SITE_CAMPAIGN_2017, kept in the CHM's own CRS and 1 m grid. Skipped if the
-## output exists (delete it to redo) or the campaign's CHM is not on disk.
+## R/ingest/08_gliht_rasters.R), one raster per 2017 campaign found under the
+## G-LiHT root ($PR_GAPS_GLIHT, default raw/gliht/), plus the gap sites'. Each
+## is kept in its CHM's own CRS and 1 m grid. Skipped if the output exists
+## (delete it to redo) or the campaign has no CHM, unpacked or packed.
+##
+## --campaigns a,b limits the run to those campaigns (e.g. a test). --slice k/n
+## takes every n-th campaign starting at the k-th, so n Slurm array tasks split
+## the list between them (scripts/run_rugosity.sbatch). terra's scratch rasters
+## go to $PR_GAPS_SCRATCH when that exists, and are cleared after each campaign:
+## a strip-scheme mosaic is mostly empty bounding box and its intermediates run
+## to several GB.
+##
+## terra::focal() crashes R now and then on Windows (terra 1.8.42: ~1 run in 8,
+## no error message, exit 127 or 139). Re-run until it reports nothing left to
+## do; finished rasters are kept and a crash never leaves a final-named file.
 n_rugosity_failed <- 0L
 if (do_rugosity) {
   stopifnot(requireNamespace("terra", quietly = TRUE))
-  for (campaign in unique(SITE_CAMPAIGN_2017)) {
+  scratch <- Sys.getenv("PR_GAPS_SCRATCH", tempdir())
+  if (!dir.exists(scratch)) scratch <- tempdir()
+  terra::terraOptions(tempdir = scratch, progress = 0)
+  ## Under Slurm terra sees the whole node's memory, not the job's share.
+  slurm_mb <- suppressWarnings(as.numeric(Sys.getenv("SLURM_MEM_PER_NODE")))
+  if (is.finite(slurm_mb)) terra::terraOptions(memmax = 0.5 * slurm_mb / 1024)
+
+  campaigns <- gl_campaigns_2017()
+  only <- get_arg("--campaigns", "")
+  if (nzchar(only)) campaigns <- intersect(campaigns, strsplit(only, ",")[[1]])
+  slice <- get_arg("--slice", "")
+  if (nzchar(slice)) {
+    kn <- suppressWarnings(as.integer(strsplit(slice, "/", fixed = TRUE)[[1]]))
+    if (length(kn) != 2 || anyNA(kn) || kn[1] < 1 || kn[1] > kn[2]) {
+      stop("--slice takes k/n with 1 <= k <= n, e.g. 3/8")
+    }
+    campaigns <- campaigns[seq_along(campaigns) %% kn[2] == kn[1] %% kn[2]]
+  }
+  gl_msg(sprintf("rugosity for %d 2017 campaign(s) under %s%s", length(campaigns),
+                 gl_gliht_root(), if (nzchar(slice)) paste0(", slice ", slice) else ""))
+
+  n_made <- 0L; n_held <- 0L; n_skipped <- 0L
+  for (i in seq_along(campaigns)) {
+    campaign <- campaigns[i]
     dest <- gl_rugosity_path(campaign)
-    if (file.exists(dest)) { gl_msg("held: ", basename(dest)); next }
-    chm <- tryCatch(gl_gliht_raster(campaign, "CHM"), error = function(e) NULL)
-    if (is.null(chm)) { gl_msg("no 2017 CHM for ", campaign, " — skipped"); next }
-    gl_msg("rugosity: ", campaign)
+    if (file.exists(dest)) { n_held <- n_held + 1L; next }
+
+    workdir <- file.path(scratch, paste0("rugosity_", campaign))
+    chm <- gl_try(gl_chm_for_rugosity(campaign, workdir), campaign)
+    if (is.null(chm)) {
+      gl_msg(sprintf("[%d/%d] %s: no 2017 CHM — skipped", i, length(campaigns), campaign))
+      n_skipped <- n_skipped + 1L; unlink(workdir, recursive = TRUE); next
+    }
+    gl_msg(sprintf("[%d/%d] %s: %.0f M cells", i, length(campaigns), campaign,
+                   terra::ncell(chm) / 1e6))
     dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
     partial <- sub("[.]tif$", ".part.tif", dest)  # rename on success
     ok <- !is.null(gl_try(gl_canopy_rugosity(chm, filename = partial), campaign))
-    if (ok) file.rename(partial, dest) else {
+    if (ok) { file.rename(partial, dest); n_made <- n_made + 1L } else {
       unlink(partial); n_rugosity_failed <- n_rugosity_failed + 1L
     }
+    rm(chm); gc(verbose = FALSE)
+    terra::tmpFiles(current = TRUE, orphan = TRUE, remove = TRUE)
+    unlink(workdir, recursive = TRUE)
   }
+  gl_msg(sprintf("rugosity done: %d made, %d already held, %d without a CHM, %d failed",
+                 n_made, n_held, n_skipped, n_rugosity_failed))
 }
 
 ## --- Figures -----------------------------------------------------------------
