@@ -16,11 +16,14 @@
 # publishes it (unpacked into $PR_GAPS_SCRATCH and deleted afterwards). Point
 # PR_GAPS_GLIHT at whichever tree holds all 2017 campaigns.
 #
+# Memory stays near 1 GB (intermediates go to disk); scratch needs ~23 bytes per
+# CHM cell (measured on EV1), ~10 GB for a 400 M-cell mosaic.
+#
 # Afterwards: sacct -j <jobid> --format=JobID,Elapsed,MaxRSS,State
 #SBATCH --job-name=rugosity
 #SBATCH --array=1-8
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
+#SBATCH --mem=8G
 #SBATCH --time=08:00:00
 #SBATCH --output=%x-%A_%a.out
 ##SBATCH --partition=...      # uncomment if the cluster requires one
@@ -49,7 +52,9 @@ echo "[$(date '+%F %T')] rugosity slice $SLICE on $(hostname), job ${SLURM_JOB_I
 # terra::focal() has crashed R intermittently on Windows; retry in case Linux
 # does too. Each attempt skips the rasters already finished.
 for attempt in 1 2 3 4 5; do
-    Rscript scripts/03_download_covars.R --rugosity --slice "$SLICE" && break
-    echo "[$(date '+%F %T')] attempt $attempt exited with $?; retrying" >&2
+    Rscript scripts/03_download_covars.R --rugosity --slice "$SLICE"
+    status=$?                      # before $(date) below, which resets $?
+    [[ $status -eq 0 ]] && break
+    echo "[$(date '+%F %T')] attempt $attempt exited with $status; retrying" >&2
 done
 echo "[$(date '+%F %T')] finished"

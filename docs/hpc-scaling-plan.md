@@ -1,0 +1,238 @@
+# Scaling gap delineation to every 2017 → 2018 campaign on the HPC
+
+**Date:** 2026-11-02
+**Scope:** the Maria interval (2017_pre → 2018_post). The 2018 → 2020 recovery interval reuses
+everything here with the epochs swapped (§9).
+**Builds on:** [point-gaps-plan.md](point-gaps-plan.md) §4, ADRs [006](decisions/006-repeat-coverage-definition.md),
+[007](decisions/007-forest-mask-source.md), [009](decisions/009-gap-definition-rule.md);
+`python/README.md` (cluster setup, `run_canopy.sbatch`)
+
+---
+
+## 1. The job
+
+| | 2017 | 2018 |
+|---|---|---|
+| Campaigns (in a pair with ≥ 25 ha overlap) | 138 | 103 |
+| LAS files | 1,772 | 1,295 |
+| Compressed LAS | 275 GB | 228 GB |
+| Points (at EV1's 63 M points per GB) | ~17 billion | ~14 billion |
+| Scheme | 125 strip (`lXsY`), 13 tiled (`cXrY`) | 98 strip, 5 tiled |
+
+- **Overlap where both flights have CHM data:** 58,801 ha (`pr_repeat_summary_chm.csv`).
+  That's 64× EV1's 926 ha. All 241 campaigns already have exact CHM footprints.
+- **Campaign pairs:** 415, many-to-many (a median of 3 pairs per 2017 campaign). Summed pair
+  overlap counts much of the ground two or three times.
+- **2017 points to analyse:** at EV1's density, roughly 12–18 billion in the overlap, before
+  removing ground flown twice.
+
+What EV1 (untiled, 711 M points read) showed:
+
+- **Reading compressed LAS was the slowest predictable step:** about 25 min, roughly 0.5 M
+  points/s for one job.
+- **The distance step needs 2017 points to have 2018 data nearby.** Points hundreds of
+  metres from any 2018 return stalled it for hours. With the overlap study area, the run
+  finished.
+- **Peak memory was 48 GB untiled.** A 1 km tile needs a few GB.
+
+## 2. Problems the prototype layout doesn't solve
+
+1. **Strip files span many tiles.** 223 of 241 campaigns ship one file per flight strip,
+   which can run for kilometres. A gzip file can't be read part-way, so a tile job would
+   decompress every strip that touches it in full. A strip crossing 10 tiles would be
+   read 10 times (plus neighbours for buffers). **Fix: retile once (§4.2).**
+2. **Overlapping flights.** Where two 2017 campaigns cover the same ground, using both would
+   count gaps twice and double the point density (confound 2). **Fix: each location gets
+   exactly one 2017 → 2018 pair (§4.1).**
+3. **Gaps crossing tile edges.** Per-tile labelling with per-tile minimum-size filters would
+   split and drop edge gaps. **Fix: label after merging (§4.4).**
+4. **Storage.** The prototype cache costs ~68 bytes per 2017 point, about 0.9 TB
+   island-wide (§6).
+5. **One global labelling step won't fit.** LFDP has 7,500 changed voxels per ha at 3 m.
+   Island-wide that's ~440 M voxels at 3 m and ~1 billion at 2 m, too many for one sparse
+   graph. **Fix: label per tile, then join across tile edges (§4.4).**
+
+## 3. Decisions needed before building
+
+| # | Decision | Recommendation | Why it has to come first |
+|---|---|---|---|
+| D1 | Collect a per-column 2018 summary (return count, lowest and highest return) in step 1, for the observability flag and 2018 canopy height (point-gaps-plan §2.2, §2.4)? Rules applied in step 2 | Yes: per-column summary (~10 GB island-wide); full 2018 voxel occupancy (~50–60 GB) only if LFDP shows the column test is too coarse | Step 1 reads the 2018 points and discards them. Adding this later doesn't change the distances, but it needs a second pass over all ~14 billion 2018 points and a cache-format change. If observability enters the gap definition, ADR 009's tests must run with it, so decide before M3 |
+| D2 | Cap the C2C search at the buffer width B (e.g. 50 m), flagging capped distances? | Yes | It changes no gap: every threshold is ≪ B. It removes the EV1 failure mode inside footprint holes (water, cloud gaps in the CHM) |
+| D3 | Pair priority for overlapping flights (§4.1) | Same block name first, then larger pair overlap, then closer flight altitude | Decides which 2017 flight represents each location |
+| D4 | Keep `source_c2c.bin` (CloudCompare file)? | No (make it optional, off) | ~20 B/point, ~0.3 TB, unused by the pipeline |
+| D5 | Point labels for sensitivity runs | Primary threshold only; sensitivity runs keep voxel tables | 4 B/point/threshold: ~54 GB each |
+| D6 | ADR 009 tests (null, 25 ha windows) | Run during §7 milestones M1–M3 | Step 2's primary threshold is chosen by them; step 1 doesn't depend on them |
+
+## 4. Design
+
+### 4.1 Work units: one pair per location, cut into 1 km tiles
+
+1. **Partition the overlap by pair.** Rank the 415 pairs by D3. The first pair owns its CHM
+   overlap polygon, and each later pair owns its overlap minus everything already owned.
+   The result is a set of non-overlapping pieces that together cover the 58,801 ha, each
+   labelled with one 2017 campaign and one 2018 campaign.
+2. **Cut into tiles:** a 1 km grid in EPSG:32620 (the LAS CRS) with edges on whole metres,
+   so 1 m voxels never straddle a tile edge. Ownership is half-open
+   (`xmin ≤ x < xmax`, `ymin ≤ y < ymax`), so each point and voxel belongs to exactly one
+   tile.
+3. **A work unit is one tile × one pair piece.** It records the tile ID, the pair, its piece
+   polygon (core ∩ piece) and its area. Most tiles have one unit; tiles where ownership
+   changes have two or three.
+4. **Per unit:** analyse only the 2017 points of its 2017 campaign inside its polygon. Use
+   as reference that pair's 2018 points within the polygon's bounding box + B, not clipped
+   to the piece, as at LFDP.
+
+Output: `work_units.gpkg` (polygons + attributes) and `work_units.csv`, which is the job
+list. Map it and check it before anything runs.
+
+### 4.2 Retile once
+
+A Slurm array over the 3,067 LAS files. Each job streams one file once and writes its points
+into per-campaign 1 km buckets: `$SCRATCH/retiled/<campaign>/<tile>.laz` (LAZ via `lazrs`).
+It keeps only the attributes the pipeline uses: xyz, classification, and return number and
+scan angle in case D1 is adopted. A unit then reads its 2017 bucket and the 3 × 3 2018
+buckets around it.
+
+- **Compute:** about 31 billion points at ~0.5 M points/s is ~18 core-hours, a few tens of
+  minutes as an array.
+- **Disk:** ~250–310 GB of LAZ on scratch. It can be regenerated from `raw/`.
+- **Checks:** per-file point counts in = out, and no point written twice.
+
+### 4.3 Step 1 per unit
+
+`canopy.py --unit <id>`: an extension of the current single-site run, with the same cache
+format and provenance.
+
+- **2017 points:** the unit's bucket, clipped to its polygon with the half-open tile rule.
+- **2018 reference:** the 3 × 3 buckets, clipped to the polygon's bounding box + B.
+- **Distances:** C2C as now, capped at B if D2 is adopted.
+- **HAG:** from that 2017 campaign's DTM. Merge its strips with `terra::merge` once per
+  campaign, not with a VRT (README: NaN no-data).
+- **Caching:** one cache per unit; a unit with a complete cache is skipped on rerun.
+
+### 4.4 Step 2: per unit, then joined
+
+1. **Per unit:** write changed voxels in global indices at every threshold in the run
+   (primary plus sensitivity set): per-voxel point counts at each threshold, distance and
+   HAG sums, min and max. No labelling or size filters yet.
+2. **Label within each tile** using the existing labelling code.
+3. **Join across tile edges:** compare only voxels in the outermost layer of each tile with
+   their neighbours across the edge. Union-find over (tile, local label) pairs gives global
+   gap IDs. This scales with tile-edge length, not with the island.
+4. **Gap attributes:** combine per-tile partial sums by global ID. Means come from summed
+   counts and sums. Only gaps that cross a tile edge need their voxels gathered for
+   footprint and convex-hull volume.
+5. **Apply the minimum-size filters** to the joined gaps.
+6. **Exports:**
+   - one GeoPackage of gap footprints per campaign block, reprojected to EPSG:32161 for the
+     covariate scripts;
+   - LAZ per tile;
+   - the global gap table as Parquet.
+7. **The seeded split** (an ADR 009 sensitivity run) needs growth across tile edges. Run it
+   only on the prototype windows and whole blocks that fit one job, not island-wide.
+
+### 4.5 Post-processing (masking after C2C)
+
+- **Forest fraction per gap:** Hansen per ADR 007, plus C-CAP for the comparison. This
+  extends `scripts/04_gap_covariates.R` with the pre-registered keep rule (e.g. forest
+  fraction ≥ 0.5).
+- **Covariates per gap:** via the existing script.
+- **Area accounting:** both-flights coverage (from per-unit coverage cells) ∩ forest mask,
+  per forest type. This is the denominator for gap density and damage per hectare
+  (plan §2.10). It also records the area each step removes.
+
+### 4.6 Quality control
+
+- **Per unit:** `check_run.py` checks, plus the ground HAG median (±0.3 m) and the ground
+  C2C median.
+- **Island-wide:**
+  - no `(file, record)` appears in two units;
+  - per-unit 2017 point counts sum to the bucket totals;
+  - every work unit has a complete cache and exports.
+- **Maps:**
+  - ground C2C median per tile (registration problems show up as blocks);
+  - gap area fraction per tile;
+  - the share of the largest gap per tile.
+- **Spot checks:** a few dozen of the largest gaps against orthophotos.
+
+## 5. Slurm layout
+
+Six stages, each a job array chained with `--dependency=afterok`. Each array task is
+restartable through a done marker: a complete cache manifest or a finished output.
+
+| Stage | Array over | Resources per task (estimate, set by M3) | Wall time |
+|---|---|---|---|
+| 0. Plan units | – (one job) | 4 cores, 16 GB | < 1 h |
+| 1. Retile | 3,067 LAS files | 1 core, 4 GB | minutes each |
+| 2. Step 1 | ~1,000–1,500 units | 8 cores, 16 GB | minutes each |
+| 3. Step 2 per unit | units | 2 cores, 8 GB | minutes |
+| 4. Join + exports | one job per threshold | 8 cores, 64 GB | < 2 h |
+| 5. Post-processing | blocks | 4 cores, 16 GB | < 1 h |
+
+- **Array limits:** use `--array=1-N%M` to cap concurrency (the cluster's `MaxArraySize`
+  and job limits decide M). Split arrays over 1,000 tasks if needed.
+- **Logs:** one log per task, named by unit ID.
+- **Status:** a `status.csv` built from the done markers shows what's left. Resubmitting
+  a stage only runs unfinished tasks.
+- **Benchmark:** `sacct` per stage gives time and memory per unit, which updates the table.
+- **Reuse:** every task loads the GCC module, sets `LD_LIBRARY_PATH` and uses headless Qt,
+  as in `run_canopy.sbatch`.
+- **Scheduler:** plain Slurm arrays with dependencies are enough. Snakemake would add file
+  tracking but isn't needed at this size.
+
+## 6. Storage
+
+| What | Size (estimate) | Where |
+|---|---|---|
+| Raw LAS | 503 GB | `raw/` (shared copy or own), read-only |
+| Retiled buckets | 250–310 GB | scratch; regenerable |
+| Per-unit distance caches | ~0.65 TB (~48 B/point, without the `.bin`) | project storage; expensive to recompute |
+| Point labels, primary threshold | ~54 GB | project storage |
+| Voxel tables, all thresholds | tens of GB | project storage |
+| Gap tables, GeoPackages, area accounting | a few GB | project storage, backed up |
+
+Check the quota (`quota -s` or the cluster's equivalent) and the scratch purge policy before
+M2 (plan A.4).
+
+## 7. Milestones and gates
+
+| # | Milestone | Gate before moving on |
+|---|---|---|
+| M0 | Decisions D1–D5; quota and scratch policy checked; confirm all 3,067 LAS files are readable on the cluster (compare against `pr_files.csv`) | – |
+| M1 | Work-unit plan (§4.1) built and mapped | Units cover 58,801 ha exactly once; no 2017 location in two units |
+| M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run's gaps (same thresholds, same connectivity) up to float32 rounding (`check_run.py --compare` logic) |
+| M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted |
+| M4 | Full step 1 (all units) | Every unit complete; QC maps (ground C2C per tile) show no registration blocks |
+| M5 | Step 2 + join: primary threshold, then the ADR 009 sensitivity set | `check_run`-style consistency; largest gap per tile within the separation test |
+| M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up |
+
+M4 can run while M3's ADR is being finalised, since step 1 doesn't depend on the threshold.
+Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted.
+
+## 8. Code to write
+
+| Piece | Where | Notes |
+|---|---|---|
+| Work-unit planner | `python/plan_units.py` | Footprints and pairs from `derived/inventory/` |
+| Retiler | `python/retile.py` | One LAS file per task |
+| Per-unit mode for `canopy.py` | `canopy.py` (`--unit`) | Reuses `prepare` / `analyze_threshold`; half-open clipping; bounding-box reference; optional search cap (D2) and `.bin` (D4) |
+| Per-unit voxel export, cross-tile join, global attributes | `python/join_gaps.py` | Union-find over tile-edge voxels |
+| Area accounting | `python/area.py` or R | Coverage cells ∩ forest mask per forest type |
+| Slurm stage scripts + status | `workflow/` (plan Appendix A.1) | One `.sbatch` per stage, plus a submit script |
+| QC report | extends `check_run.py` | Island-wide checks and per-tile maps |
+
+## 9. Afterwards: the recovery interval
+
+The same pipeline runs with 2018_post → 2020_recovery (53 pairs, 47 with ≥ 25 ha). It needs
+the post→pre direction for gain (point-gaps-plan §2.6) and falls under the week-9 gate
+(plan §2.2). The work-unit planner and retiled 2018 buckets are reused.
+
+## 10. Open questions
+
+1. **Cluster limits:** maximum array size, per-user running jobs, node cores and memory,
+   and partition and account names.
+2. **Storage:** project quota, and whether scratch is purged on a timer.
+3. **Data on the cluster:** is the shared copy at `/ibstorage/shared/PR_NASA_GLiHT` complete
+   for all 241 campaigns, or does `$PR_GAPS_DATA/raw/gliht` need a bulk download
+   (`scripts/02_download.R --products las`, ~503 GB)?
+4. **D1–D5** (§3).

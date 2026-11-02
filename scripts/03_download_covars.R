@@ -373,10 +373,14 @@ if (do_rugosity) {
   stopifnot(requireNamespace("terra", quietly = TRUE))
   scratch <- Sys.getenv("PR_GAPS_SCRATCH", tempdir())
   if (!dir.exists(scratch)) scratch <- tempdir()
-  terra::terraOptions(tempdir = scratch, progress = 0)
-  ## Under Slurm terra sees the whole node's memory, not the job's share.
-  slurm_mb <- suppressWarnings(as.numeric(Sys.getenv("SLURM_MEM_PER_NODE")))
-  if (is.finite(slurm_mb)) terra::terraOptions(memmax = 0.5 * slurm_mb / 1024)
+  ## Every intermediate to disk, in small chunks. WHY: gl_canopy_rugosity() makes
+  ## about a dozen full-size rasters, and terra keeps each in RAM when that one
+  ## alone fits, without counting the ones it already holds. On the EV1 CHM
+  ## (41 M cells) that peaked at 8.9 GB, ~217 bytes/cell, and an 85 M-cell
+  ## mosaic was killed by a 16 GB Slurm job. On disk: 0.95 GB peak, 70 s
+  ## instead of 43 s, identical result. The cost moves to scratch disk instead:
+  ## measured 23 bytes/cell (0.9 GB for EV1), so ~10 GB for a 400 M-cell mosaic.
+  terra::terraOptions(tempdir = scratch, progress = 0, todisk = TRUE, memmax = 1)
 
   campaigns <- gl_campaigns_2017()
   only <- get_arg("--campaigns", "")
