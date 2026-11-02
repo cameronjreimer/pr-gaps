@@ -514,7 +514,40 @@ def dtm_signatures(path):
             if p.stem.lower() == current.stem.lower()
             and p.suffix.lower() in sidecars and p.is_file()
         )
-    return [file_signature(p) for p in sorted(files)]
+    return [file_signature(p) for p in sorted(files) if not _statistics_only(p)]
+
+
+# PAM elements that only cache what GIS tools computed from the pixels.
+_PAM_STATISTICS = {
+    "PAMDataset", "PAMRasterBand", "Histograms", "HistItem", "HistMin", "HistMax",
+    "BucketCount", "IncludeOutOfRange", "Approximate", "HistCounts", "Metadata", "MDI",
+}
+
+
+def _statistics_only(path):
+    """True for a .aux.xml holding only cached statistics and histograms.
+
+    QGIS and ArcGIS write these beside a raster when it is merely viewed. They cannot
+    change the values GDAL reads, so they must not invalidate a cache built on that
+    DTM. A sidecar that sets anything else (no-data, scale, offset, georeferencing,
+    other metadata) still counts as an input.
+    """
+    import xml.etree.ElementTree as ET
+
+    if not path.name.lower().endswith(".aux.xml"):
+        return False
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError):
+        return False
+    for element in root.iter():
+        if element.tag not in _PAM_STATISTICS:
+            return False
+        if element.tag == "Metadata" and element.get("domain"):
+            return False
+        if element.tag == "MDI" and not element.get("key", "").startswith("STATISTICS_"):
+            return False
+    return root.tag == "PAMDataset"
 
 
 def semantic_preparation(config):
@@ -1889,8 +1922,8 @@ def check_inputs():
         )
 
 
-def main():
-    os.chdir(Path(__file__).resolve().parent)
+def prepare_site():
+    """Step 1 for the selected SITE: check inputs, then build or reuse its cache."""
     check_inputs()
     if Path(SCRATCH).is_dir():
         tempfile.tempdir = SCRATCH
@@ -1903,15 +1936,26 @@ def main():
         min_post_returns=MIN_POST_RETURNS, threads=THREADS, chunk_size=CHUNK_SIZE,
     ))
     print(f"Cache {manifest['cache_id']}: {manifest['point_count']} pre points")
+    return manifest
 
-    stamp(f"gaps at thresholds: {THRESHOLDS}")
-    run = analyze_cache(
-        CACHE, OUTPUT, thresholds=THRESHOLDS, voxel_size=VOXEL_SIZE,
-        grid_origin=GRID_ORIGIN, connectivity=CONNECTIVITY, min_points=MIN_POINTS,
-        min_volume=MIN_VOLUME, min_voxel_points=MIN_VOXEL_POINTS,
-        exclude_classes=EXCLUDE_CLASSES, min_height=MIN_HEIGHT,
-        seed_threshold=SEED_THRESHOLD,
+
+def gap_settings(**overrides):
+    """Step-2 keyword arguments for analyze_cache from the settings, with overrides."""
+    settings = dict(
+        thresholds=THRESHOLDS, voxel_size=VOXEL_SIZE, grid_origin=GRID_ORIGIN,
+        connectivity=CONNECTIVITY, min_points=MIN_POINTS, min_volume=MIN_VOLUME,
+        min_voxel_points=MIN_VOXEL_POINTS, exclude_classes=EXCLUDE_CLASSES,
+        min_height=MIN_HEIGHT, seed_threshold=SEED_THRESHOLD,
     )
+    settings.update(overrides)
+    return settings
+
+
+def main():
+    os.chdir(Path(__file__).resolve().parent)
+    prepare_site()
+    stamp(f"gaps at thresholds: {THRESHOLDS}")
+    run = analyze_cache(CACHE, OUTPUT, **gap_settings())
     print(f"Gaps {run['run_id']}: {run['output']} ({run['segmentation']})")
     print(f"Ground pre-to-post C2C: {run['ground_separation']}")
     print((Path(run["output"]) / "summary.csv").read_text(), end="")

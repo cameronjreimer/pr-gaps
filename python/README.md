@@ -102,6 +102,24 @@ PR_GAPS_SEED_THRESHOLD=5 sbatch -J canopy-ev1-seed python/run_canopy.sbatch ev1
 
 Each run's `run.json` records the rule under `segmentation`.
 
+## Parameter sweeps
+
+`sweep.py` runs one site across thresholds and connectivities and tabulates the results.
+The defaults are LFDP, 1 / 1.5 / 2 / 3 / 4 / 5 / 8 m, and 26 and 6:
+
+```bash
+.venv/Scripts/python python/sweep.py                            # Windows; .venv/bin/python on Linux
+PR_GAPS_SITE=ev1 .venv/bin/python python/sweep.py --thresholds 2 3 5
+```
+
+It makes one ordinary gap run per connectivity, reusing the distance cache, then writes
+`runs/canopy/<site>/sweeps/<name>/`:
+
+- `comparison.csv`: one row per connectivity × threshold, with gap count, volume,
+  largest gap and its share, median/p90 gap size, and gaps ≥ 10 / 100 / 1,000 m³
+- `gaps_long.csv`: every gap from every run, for size-distribution plots
+- `runs.json`: the run folders behind it
+
 ## Environment
 
 `init_env.ps1` (Windows) and `init_env.sh` (Linux) build a venv at `pr-gaps/.venv`
