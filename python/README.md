@@ -120,6 +120,22 @@ It makes one ordinary gap run per connectivity, reusing the distance cache, then
 - `gaps_long.csv`: every gap from every run, for size-distribution plots
 - `runs.json`: the run folders behind it
 
+### Field validation (LFDP)
+
+`quadrat_gaps.py` sums every run of a sweep into the LFDP 20 m and 40 m census quadrats.
+Each 1 m column goes to the quadrat holding its centre, giving gap area (% of quadrat),
+gap volume (m³, and % of the 2017 vegetation voxels it was carved from) and gap counts.
+`scripts/06_lfdp_quadrat_validation.R` then compares those with stem loss and basal-area
+loss from the post-Maria census, using the definitions in `c2c-validation-v2.R`:
+
+```bash
+.venv/Scripts/python python/quadrat_gaps.py
+Rscript scripts/06_lfdp_quadrat_validation.R --scatter 2,3,5
+```
+
+Results go to `<sweep>/quadrats/` and `<sweep>/validation/` (fit table, R² chart,
+scatter plots).
+
 ## Environment
 
 `init_env.ps1` (Windows) and `init_env.sh` (Linux) build a venv at `pr-gaps/.venv`
