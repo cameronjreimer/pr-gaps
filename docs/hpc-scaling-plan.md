@@ -169,12 +169,17 @@ restartable through a done marker: a complete cache manifest or a finished outpu
 | 4. Join + exports | one job per threshold | 8 cores, 64 GB | < 2 h |
 | 5. Post-processing | blocks | 4 cores, 16 GB | < 1 h |
 
-- **Nodes:** 80 cores and 128 GB of RAM. If that is a single node, memory binds before
-  cores: at 16 GB per step-1 task, 7–8 tasks run at once (8 cores each, ~64 cores busy). If
-  M3 shows units need less memory, fit more. Leave ~8 GB for the system.
-- **Array limits:** use `--array=1-N%M` to cap concurrency. The cluster's limits aren't
-  documented yet; see §10 for how to read them. Until then, keep arrays ≤ 1,000 tasks
-  (a common default for `MaxArraySize`) and split larger stages into several arrays.
+- **Nodes** (`sinfo`, 2026-11-03): partition `R128C40` (default) has 8 nodes with 40 CPUs
+  and 128 GB each; `R256C128` has 2 nodes with 128 CPUs and 257 GB each. Neither has a
+  time limit. On an `R128C40` node, cores bind before memory: at 8 cores and 16 GB per
+  step-1 task, 5 tasks fit (80 GB). If the whole cluster were free, that would be 40 tasks
+  on `R128C40` plus 32 on `R256C128`. The cluster is shared, so plan for less. Put the
+  untiled or join jobs that need more than ~120 GB on `R256C128`.
+- **Array limits** (`scontrol`, `sacctmgr`, 2026-11-03): `MaxArraySize` = 30001 (task IDs
+  0–30000) and `MaxJobCount` = 50000 cluster-wide. There are no per-user `MaxJobs` /
+  `MaxSubmit` limits. Every stage fits in one array (the largest is the 3,067-file
+  retile). Use `--array=1-N%M` anyway to stay a good neighbour on a shared cluster:
+  start with `%20` for step 1 and raise it if the queue is empty.
 - **Logs:** one log per task, named by unit ID.
 - **Status:** a `status.csv` built from the done markers shows what's left. Resubmitting
   a stage only runs unfinished tasks.
@@ -203,7 +208,7 @@ sensitivity set.
 
 | # | Milestone | Gate before moving on |
 |---|---|---|
-| M0 | D3 reviewed; array limits read (§10); confirm all 3,067 LAS files are present on the cluster (§10, item 2). D1, D2, D4, D5 and storage are settled | – |
+| M0 | D3 reviewed. Done 2026-11-03: array limits and nodes read (§5); all 3,067 LAS files present (`check_download.py`). D1, D2, D4, D5 and storage are settled | – |
 | M1 | Work-unit plan (§4.1) built and mapped | Units cover 58,801 ha exactly once; no 2017 location in two units |
 | M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run's gaps (same thresholds, same connectivity) up to float32 rounding (`check_run.py --compare` logic) |
 | M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted |
@@ -234,22 +239,13 @@ the post→pre direction for gain (point-gaps-plan §2.6) and falls under the we
 
 ## 10. Open questions
 
-Known (2026-11-03): 80 cores and 128 GB of RAM; storage quota not limiting; the full
-download is in `/ibstorage/cam/G-LiHT/data/raw/gliht`; scratch purge policy unknown, so
-nothing irreplaceable goes there.
+Known (2026-11-03):
+- Nodes and array limits are in §5.
+- The storage quota is not limiting.
+- The full download is in `/ibstorage/cam/G-LiHT/data/raw/gliht`, and `check_download.py`
+  passes.
+- The scratch purge policy is unknown, so nothing irreplaceable goes there.
 
-1. **Cluster limits.** These read the configured limits without the documentation:
-   ```bash
-   scontrol show config | grep -E -i 'MaxArraySize|MaxJobCount'
-   sacctmgr show assoc user=$USER format=Account,Partition,MaxJobs,MaxSubmit,MaxTRES -P
-   sinfo -o '%P %D %c %m %l'      # partitions: nodes, cores and memory per node, time limit
-   ```
-   `MaxArraySize` caps the task IDs in one array. `MaxJobs` / `MaxSubmit` cap running and
-   queued jobs per user; blank means no per-user limit. `sinfo` also answers whether the
-   80 cores / 128 GB is one node or one of several.
-2. **Is the download complete?** Compare the LAS files on disk with the inventory, from
-   `pr-gaps/`:
-   ```bash
-   .venv/bin/python python/check_download.py
-   ```
-3. **D3** under review (§3).
+1. **D3** is under review (§3).
+2. **Benchmarks:** `sacct` Elapsed and MaxRSS from the untiled EV1 run. These replace the
+   §5 estimates until M3.
