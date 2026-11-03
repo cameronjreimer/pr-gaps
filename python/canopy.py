@@ -172,6 +172,20 @@ COVERAGE_DTYPE = np.dtype(
     [("ix", "<i8"), ("iy", "<i8"), ("pre_count", "<u8"), ("post_count", "<u8")]
 )
 _LAS_SUFFIXES = (".las", ".laz", ".las.gz", ".laz.gz")
+# Lowest 2018 return per coverage cell (same rows as coverage.npy), float32 world z;
+# NaN where the cell has no 2018 return. Noise classes are not counted as lowest.
+POST_LOWEST_FILE = "post_lowest_z.npy"
+LOWEST_RETURN_EXCLUDED_CLASSES = (7, 18)  # low and high noise
+
+
+def post_lowest_description():
+    return {
+        "file": POST_LOWEST_FILE,
+        "aligned_with": "coverage.npy",
+        "value": "lowest 2018 return z per coverage cell (world z, float32; NaN = none)",
+        "excluded_classes": list(LOWEST_RETURN_EXCLUDED_CLASSES),
+        "domain": "2018 points inside the study area, after the post transform",
+    }
 
 
 def read_json(path):
@@ -384,6 +398,12 @@ def load_cache(path, *, provenance=True):
         if cells.ndim != 1 or cells.dtype != COVERAGE_DTYPE:
             raise ValueError("Invalid sparse coverage.npy schema")
         arrays["coverage"] = cells
+        # Caches made before 2026-11-03 lack it; backfill_post_lowest() adds it.
+        if manifest.get("post_lowest_return"):
+            lowest = np.load(root / POST_LOWEST_FILE, mmap_mode="r", allow_pickle=False)
+            if lowest.shape != cells.shape or lowest.dtype != np.float32:
+                raise ValueError(f"Invalid {POST_LOWEST_FILE}: must align with coverage.npy")
+            arrays["post_lowest"] = lowest
     return manifest, arrays
 
 
@@ -653,30 +673,44 @@ class Coverage:
 
     def __init__(self, resolution):
         self.resolution = resolution
-        self.cells, self.counts = [], []
+        self.cells, self.counts, self.lows = [], [], []
+        self.post_lowest = None
 
-    def add(self, xyz, epoch):
+    def add(self, xyz, epoch, low_z=None):
+        """Count returns per cell; low_z (post only) also tracks each cell's lowest z.
+
+        low_z is z per point with +inf for points that must not count as lowest.
+        """
         # Per-chunk partial counts; merged once in array().
-        cells, counts = np.unique(
-            xy_cells(xyz, self.resolution), axis=0, return_counts=True
+        cells, inverse, counts = np.unique(
+            xy_cells(xyz, self.resolution), axis=0, return_inverse=True, return_counts=True
         )
         pair = np.zeros((len(cells), 2), dtype=np.uint64)
         pair[:, epoch] = counts
+        low = np.full(len(cells), np.inf)
+        if low_z is not None and len(cells):
+            np.minimum.at(low, inverse.reshape(-1), low_z)
         self.cells.append(cells.reshape(-1, 2))
         self.counts.append(pair)
+        self.lows.append(low)
 
     def array(self):
+        """The coverage ledger; also sets post_lowest, aligned to its rows (NaN = none)."""
         keys, inverse = np.unique(
             row_keys(np.concatenate(self.cells)), return_inverse=True
         )
+        inverse = inverse.reshape(-1)
         counts = np.concatenate(self.counts)
         output = np.empty(len(keys), dtype=COVERAGE_DTYPE)
         output["ix"], output["iy"] = keys.view(np.int64).reshape(-1, 2).T
         for column, name in enumerate(("pre_count", "post_count")):
             # float64 weights are exact for counts below 2**53.
             output[name] = np.bincount(
-                inverse.reshape(-1), weights=counts[:, column], minlength=len(keys)
+                inverse, weights=counts[:, column], minlength=len(keys)
             )
+        lowest = np.full(len(keys), np.inf)
+        np.minimum.at(lowest, inverse, np.concatenate(self.lows))
+        self.post_lowest = np.where(np.isfinite(lowest), lowest, np.nan).astype(np.float32)
         return output
 
 
@@ -737,7 +771,18 @@ def stream_epoch(
                                 f"Post transform produced nonfinite geometry in {path}"
                             )
                     mask = in_domain(xyz, polygon)
-                    coverage.add(xyz[mask], 0 if provenance else 1)
+                    if provenance:
+                        coverage.add(xyz[mask], 0)
+                    else:
+                        # Lowest 2018 return per column, noise excluded: evidence of
+                        # how far down the 2018 pulses reached (observability).
+                        low_z = xyz[mask, 2].copy()
+                        noise = np.isin(
+                            np.asarray(points.classification)[mask],
+                            LOWEST_RETURN_EXCLUDED_CLASSES,
+                        )
+                        low_z[noise] = np.inf
+                        coverage.add(xyz[mask], 1, low_z)
                     if provenance:
                         selected = np.flatnonzero(mask)
                         xyz = xyz[mask]
@@ -762,6 +807,70 @@ def stream_epoch(
                     f"LAS point count disagrees with header in {path}: {offset} != {expected_count}"
                 )
     return total, minimum, maximum
+
+
+def backfill_post_lowest(cache, chunk_size=CHUNK_SIZE):
+    """Add post_lowest_z.npy to a cache made before it was recorded in step 1.
+
+    Re-reads only the cache's own 2018 files (checked unchanged), with its study area
+    and post transform; no distances are recomputed. The 2018 return count per cell is
+    recomputed too and must equal coverage.npy exactly, or nothing is written.
+    """
+    import laspy
+    from pyproj import CRS
+
+    root = Path(cache).expanduser().resolve(strict=True)
+    manifest, arrays = load_cache(root)
+    if manifest.get("post_lowest_return"):
+        print(f"{root} already has {POST_LOWEST_FILE}")
+        return manifest
+    references = manifest["reference_files"]
+    verify_source_files(references)
+    config = manifest["preparation"]
+    verify_source_files(config["study_area"])
+    areas = [Path(s["path"]) for s in config["study_area"]
+             if Path(s["path"]).suffix.lower() in (".gpkg", ".shp", ".geojson")]
+    polygon = load_domain(areas[0], CRS.from_wkt(manifest["crs_wkt"])) if areas else None
+    transform = np.asarray(manifest["registration"]["post_transform"], dtype=np.float64)
+    transform = None if np.allclose(transform, np.eye(4)) else transform
+
+    coverage = Coverage(manifest["coverage"]["resolution_m"])
+    for signature in references:
+        with materialized_las(signature["path"]) as local, laspy.open(local) as reader:
+            for points in reader.chunk_iterator(chunk_size):
+                xyz = np.column_stack((points.x, points.y, points.z)).astype(np.float64)
+                if transform is not None:
+                    xyz = xyz @ transform[:3, :3].T + transform[:3, 3]
+                mask = in_domain(xyz, polygon)
+                low_z = xyz[mask, 2].copy()
+                noise = np.isin(np.asarray(points.classification)[mask],
+                                LOWEST_RETURN_EXCLUDED_CLASSES)
+                low_z[noise] = np.inf
+                coverage.add(xyz[mask], 1, low_z)
+    ledger = coverage.array()
+    cells = arrays["coverage"]
+    keys = row_keys(np.column_stack((cells["ix"], cells["iy"])))
+    position = np.searchsorted(keys, row_keys(np.column_stack((ledger["ix"], ledger["iy"]))))
+    if (np.any(position >= len(keys))
+            or not np.array_equal(cells["ix"][position], ledger["ix"])
+            or not np.array_equal(cells["iy"][position], ledger["iy"])):
+        raise ValueError("2018 cells do not match coverage.npy; cache inputs differ")
+    expected = np.asarray(cells["post_count"])
+    recounted = np.zeros(len(cells), dtype=np.uint64)
+    recounted[position] = ledger["post_count"]
+    if not np.array_equal(recounted, expected):
+        raise ValueError("2018 return counts differ from coverage.npy; cache inputs differ")
+    lowest = np.full(len(cells), np.nan, dtype=np.float32)
+    lowest[position] = coverage.post_lowest
+    temporary = root / f".{POST_LOWEST_FILE}"
+    with temporary.open("wb") as stream:
+        np.save(stream, lowest, allow_pickle=False)
+    os.replace(temporary, root / POST_LOWEST_FILE)
+    manifest["post_lowest_return"] = {**post_lowest_description(), "backfilled": True}
+    write_json(root / "manifest.json", manifest)
+    print(f"{root}: wrote {POST_LOWEST_FILE} for {len(cells):,} cells "
+          f"({np.isfinite(lowest).mean():.1%} with a 2018 return)")
+    return manifest
 
 
 def raw_to_npy(directory, raw_name, name, dtype, shape, chunk_size):
@@ -1034,6 +1143,7 @@ def prepare(args):
                 directory, name + ".raw", name, dtype, (n_pre,), args.chunk_size
             )
         ledger = coverage.array()
+        np.save(directory / POST_LOWEST_FILE, coverage.post_lowest, allow_pickle=False)
         del coverage
         np.save(directory / "coverage.npy", ledger, allow_pickle=False)
         valid = np.lib.format.open_memmap(
@@ -1107,6 +1217,7 @@ def prepare(args):
                 ),
             },
             "height_above_ground_available": args.dtm is not None,
+            "post_lowest_return": post_lowest_description(),
         }
         write_json(directory / "manifest.json", manifest)
     return manifest

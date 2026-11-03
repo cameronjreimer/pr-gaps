@@ -56,6 +56,7 @@ def check_cache(root):
     c2c = np.asarray(arrays["c2c"])
     bad = ~np.isfinite(c2c) | (c2c < 0)
     report("FAIL" if bad.any() else "PASS", f"{bad.sum():,} missing or negative distances")
+    check_lowest(manifest, arrays, valid)
     if "hag" in arrays:
         hag = np.asarray(arrays["hag"])
         missing = np.isnan(hag[valid]).mean()
@@ -67,6 +68,29 @@ def check_cache(root):
             report("PASS" if abs(p50) < 0.3 else "FAIL",
                    f"ground height above DTM: median {p50:+.2f} m (p5 {p5:+.2f}, p95 {p95:+.2f})")
     return manifest, arrays
+
+
+def check_lowest(manifest, arrays, valid, below_m=0.5):
+    """Lowest 2018 return per column: present, populated, and how often it is below 2017."""
+    if "post_lowest" not in arrays:
+        report("WARN", "no lowest-2018-return record (python/backfill_lowest.py adds it)")
+        return
+    cells, lowest = arrays["coverage"], np.asarray(arrays["post_lowest"])
+    with_post = np.asarray(cells["post_count"]) > 0
+    filled = np.isfinite(lowest[with_post]).mean()
+    report("PASS" if filled > 0.99 else "WARN",
+           f"lowest 2018 return recorded for {filled:.2%} of columns with 2018 returns")
+    keys = canopy.row_keys(np.column_stack((cells["ix"], cells["iy"])))
+    resolution = manifest["coverage"]["resolution_m"]
+    rows = np.flatnonzero(valid)
+    below = 0
+    for start in range(0, len(rows), 20_000_000):
+        chunk = rows[start:start + 20_000_000]
+        xyz = np.asarray(arrays["xyz"][chunk])
+        cell = np.searchsorted(keys, canopy.row_keys(canopy.xy_cells(xyz, resolution)))
+        below += int(np.count_nonzero(lowest[cell] < xyz[:, 2] - below_m))
+    report("PASS", f"{below / max(len(rows), 1):.1%} of covered 2017 returns have a 2018 return "
+                   f">{below_m:g} m below them in their column (pulses reached below them)")
 
 
 def check_gaps(root, n_points):

@@ -102,6 +102,27 @@ PR_GAPS_SEED_THRESHOLD=5 sbatch -J canopy-ev1-seed python/run_canopy.sbatch ev1
 
 Each run's `run.json` records the rule under `segmentation`.
 
+## Lowest 2018 return per column
+
+Step 1 also records, for every 1 m coverage column, the lowest 2018 return (noise classes
+7 and 18 excluded) in `cache/post_lowest_z.npy`. It is float32 world z, row-aligned with
+`coverage.npy`, and NaN where a column has no 2018 return. This is the evidence for
+observability under a surviving canopy: if a 2018 return lies below a 2017 return in its
+column, the 2018 pulses reached past that height. Nothing uses it yet; the rule will be
+applied in step 2. It adds no measurable time to step 1 (LFDP: 63 s with it, 64 s without)
+and about 4 bytes per column (LFDP: 1 MB on a 611 MB cache).
+
+Caches made before 2026-11-03 don't have it. To add it without recomputing distances:
+
+```bash
+PR_GAPS_SITE=ev1 .venv/bin/python python/backfill_lowest.py
+```
+
+This re-reads only that cache's 2018 files (LFDP: 22 s; EV1: about the time step 1 spent
+reading the 2018 tiles, so run it as a job). It writes nothing unless the 2018 return counts
+it recomputes match the cache exactly. `check_run.py` reports the share of covered 2017
+returns that have a 2018 return more than 0.5 m below them: 96.0% at LFDP.
+
 ## Parameter sweeps
 
 `sweep.py` runs one site across thresholds and connectivities and tabulates the results.
