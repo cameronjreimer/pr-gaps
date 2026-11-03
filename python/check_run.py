@@ -56,6 +56,14 @@ def check_cache(root):
     c2c = np.asarray(arrays["c2c"])
     bad = ~np.isfinite(c2c) | (c2c < 0)
     report("FAIL" if bad.any() else "PASS", f"{bad.sum():,} missing or negative distances")
+    cap = manifest["preparation"]["distance"].get("max_search_dist", 0)
+    if cap:
+        capped = (c2c[valid] >= cap).mean()
+        report("WARN" if capped > 0.01 else "PASS",
+               f"{capped:.3%} of covered 2017 returns reached the {cap:g} m search cap "
+               "(no 2018 return within it)")
+    else:
+        report("PASS", "distances uncapped (cache built before the search cap)")
     check_lowest(manifest, arrays, valid)
     if "hag" in arrays:
         hag = np.asarray(arrays["hag"])

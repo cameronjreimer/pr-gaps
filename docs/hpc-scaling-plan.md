@@ -57,10 +57,10 @@ What EV1 (untiled, 711 M points read) showed:
 | # | Decision | Recommendation | Why it has to come first |
 |---|---|---|---|
 | D1 | What 2018 information beyond the distances is needed (point-gaps-plan §2.2, §2.4)? | **Settled (2026-11-03).** 2018 canopy height, and observability above the 2018 canopy, come from the published 1 m 2018 CHM (compare each 2017 point's absolute z with CHM + 2018 DTM = DSM). **Observability under a surviving canopy**: step 1 now records the lowest 2018 return per 1 m column everywhere (`post_lowest_z.npy`; no measurable time, ~4 B/column, ~2–3 GB island-wide). The 26 m `height_pct` / density metrics are covariates (stature, penetration), too coarse for per-point observability | The observability rule itself (how far below counts, own column or neighbours) is a step-2 choice. If it enters the gap definition, ADR 009's tests must run with it, so decide before M3 |
-| D2 | Cap the C2C search at the buffer width B (e.g. 50 m), flagging capped distances? | Yes | It changes no gap: every threshold is ≪ B. It removes the EV1 failure mode inside footprint holes (water, cloud gaps in the CHM) |
-| D3 | Pair priority for overlapping flights (§4.1) | Same block name first, then larger pair overlap, then closer flight altitude | Decides which 2017 flight represents each location |
-| D4 | Keep `source_c2c.bin` (CloudCompare file)? | No (make it optional, off) | ~20 B/point, ~0.3 TB, unused by the pipeline |
-| D5 | Point labels for sensitivity runs | Primary threshold only; sensitivity runs keep voxel tables | 4 B/point/threshold: ~54 GB each |
+| D2 | Cap the C2C search at the buffer width B (e.g. 50 m), flagging capped distances? | **Settled (2026-11-03): cap at 50 m**, implemented (`MAX_SEARCH_M`). Points with no 2018 return within 50 m get exactly 50.0; `check_run.py` reports their share | Tested: below the cap, distances match uncapped to float32 rounding; on LFDP (max 14.9 m) the capped distances are byte-identical. A synthetic case with points ~850 m from data ran in 0.15 s capped vs 11.4 s uncapped. Uncapped caches (LFDP, EV1) are still accepted for capped runs |
+| D3 | Pair priority for overlapping flights (§4.1) | Same block name first, then larger pair overlap, then closer flight altitude. **Under review** | Decides which 2017 flight represents each location. The partition itself is cheap to recompute (vector work, minutes). Changing it after M4 means re-running step 1 for every unit whose pair changes; retiled buckets are per campaign and unaffected. Settle before M4 |
+| D4 | Keep `source_c2c.bin` (CloudCompare file)? | **Settled (2026-11-03): dropped** (`SAVE_CC_BIN = False`) | A CloudCompare-format copy of the 2017 cloud with its distances, for viewing in the CloudCompare GUI. It duplicates `xyz.npy` + `c2c.npy`; nothing reads it. ~20 B/point (LFDP cache 642 → 461 MB), ~0.3 TB island-wide |
+| D5 | Point labels for sensitivity runs | **Settled (2026-11-03): keep the distance caches, and point labels for every threshold run** | Storage is not limiting. The caches (per-point distances) are what allow any threshold to be computed later; labels are per-threshold outputs (4 B/point, ~54 GB each), recomputable from the caches in minutes per unit |
 | D6 | ADR 009 tests (null, 25 ha windows) | Run during §7 milestones M1–M3 | Step 2's primary threshold is chosen by them; step 1 doesn't depend on them |
 
 ## 4. Design
@@ -169,8 +169,12 @@ restartable through a done marker: a complete cache manifest or a finished outpu
 | 4. Join + exports | one job per threshold | 8 cores, 64 GB | < 2 h |
 | 5. Post-processing | blocks | 4 cores, 16 GB | < 1 h |
 
-- **Array limits:** use `--array=1-N%M` to cap concurrency (the cluster's `MaxArraySize`
-  and job limits decide M). Split arrays over 1,000 tasks if needed.
+- **Nodes:** 80 cores and 128 GB of RAM. If that is a single node, memory binds before
+  cores: at 16 GB per step-1 task, 7–8 tasks run at once (8 cores each, ~64 cores busy). If
+  M3 shows units need less memory, fit more. Leave ~8 GB for the system.
+- **Array limits:** use `--array=1-N%M` to cap concurrency. The cluster's limits aren't
+  documented yet; see §10 for how to read them. Until then, keep arrays ≤ 1,000 tasks
+  (a common default for `MaxArraySize`) and split larger stages into several arrays.
 - **Logs:** one log per task, named by unit ID.
 - **Status:** a `status.csv` built from the done markers shows what's left. Resubmitting
   a stage only runs unfinished tasks.
@@ -184,21 +188,22 @@ restartable through a done marker: a complete cache manifest or a finished outpu
 
 | What | Size (estimate) | Where |
 |---|---|---|
-| Raw LAS | 503 GB | `raw/` (shared copy or own), read-only |
-| Retiled buckets | 250–310 GB | scratch; regenerable |
-| Per-unit distance caches | ~0.65 TB (~48 B/point, without the `.bin`) | project storage; expensive to recompute |
-| Point labels, primary threshold | ~54 GB | project storage |
+| Raw LAS | 503 GB | `/ibstorage/cam/G-LiHT/data/raw/gliht` (full download done), read-only |
+| Retiled buckets | 250–310 GB | **project storage**, not scratch: the scratch purge policy is unknown, and losing the buckets mid-run would mean retiling again. Delete them after M5 |
+| Per-unit distance caches | ~0.65 TB (~48 B/point; no `.bin`, D4) | project storage; expensive to recompute |
+| Lowest 2018 return per column | ~2–3 GB | inside each cache |
+| Point labels, every threshold run (D5) | ~54 GB per threshold | project storage |
 | Voxel tables, all thresholds | tens of GB | project storage |
 | Gap tables, GeoPackages, area accounting | a few GB | project storage, backed up |
 
-Check the quota (`quota -s` or the cluster's equivalent) and the scratch purge policy before
-M2 (plan A.4).
+The quota is not limiting (confirmed 2026-11-03). Total is about 1.5–2 TB with the
+sensitivity set.
 
 ## 7. Milestones and gates
 
 | # | Milestone | Gate before moving on |
 |---|---|---|
-| M0 | Decisions D1–D5; quota and scratch policy checked; confirm all 3,067 LAS files are readable on the cluster (compare against `pr_files.csv`) | – |
+| M0 | D3 reviewed; array limits read (§10); confirm all 3,067 LAS files are present on the cluster (§10, item 2). D1, D2, D4, D5 and storage are settled | – |
 | M1 | Work-unit plan (§4.1) built and mapped | Units cover 58,801 ha exactly once; no 2017 location in two units |
 | M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run's gaps (same thresholds, same connectivity) up to float32 rounding (`check_run.py --compare` logic) |
 | M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted |
@@ -215,7 +220,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 |---|---|---|
 | Work-unit planner | `python/plan_units.py` | Footprints and pairs from `derived/inventory/` |
 | Retiler | `python/retile.py` | One LAS file per task |
-| Per-unit mode for `canopy.py` | `canopy.py` (`--unit`) | Reuses `prepare` / `analyze_threshold`; half-open clipping; bounding-box reference; optional search cap (D2) and `.bin` (D4) |
+| Per-unit mode for `canopy.py` | `canopy.py` (`--unit`) | Reuses `prepare` / `analyze_threshold`; half-open clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
 | Per-unit voxel export, cross-tile join, global attributes | `python/join_gaps.py` | Union-find over tile-edge voxels |
 | Area accounting | `python/area.py` or R | Coverage cells ∩ forest mask per forest type |
 | Slurm stage scripts + status | `workflow/` (plan Appendix A.1) | One `.sbatch` per stage, plus a submit script |
@@ -229,10 +234,22 @@ the post→pre direction for gain (point-gaps-plan §2.6) and falls under the we
 
 ## 10. Open questions
 
-1. **Cluster limits:** maximum array size, per-user running jobs, node cores and memory,
-   and partition and account names.
-2. **Storage:** project quota, and whether scratch is purged on a timer.
-3. **Data on the cluster:** is the shared copy at `/ibstorage/shared/PR_NASA_GLiHT` complete
-   for all 241 campaigns, or does `$PR_GAPS_DATA/raw/gliht` need a bulk download
-   (`scripts/02_download.R --products las`, ~503 GB)?
-4. **D1–D5** (§3).
+Known (2026-11-03): 80 cores and 128 GB of RAM; storage quota not limiting; the full
+download is in `/ibstorage/cam/G-LiHT/data/raw/gliht`; scratch purge policy unknown, so
+nothing irreplaceable goes there.
+
+1. **Cluster limits.** These read the configured limits without the documentation:
+   ```bash
+   scontrol show config | grep -E -i 'MaxArraySize|MaxJobCount'
+   sacctmgr show assoc user=$USER format=Account,Partition,MaxJobs,MaxSubmit,MaxTRES -P
+   sinfo -o '%P %D %c %m %l'      # partitions: nodes, cores and memory per node, time limit
+   ```
+   `MaxArraySize` caps the task IDs in one array. `MaxJobs` / `MaxSubmit` cap running and
+   queued jobs per user; blank means no per-user limit. `sinfo` also answers whether the
+   80 cores / 128 GB is one node or one of several.
+2. **Is the download complete?** Compare the LAS files on disk with the inventory, from
+   `pr-gaps/`:
+   ```bash
+   .venv/bin/python python/check_download.py
+   ```
+3. **D3** under review (§3).

@@ -139,6 +139,14 @@ MIN_POST_RETURNS = 1
 # Not part of the cache identity. Follows a Slurm allocation when there is one.
 THREADS = int(os.environ.get("PR_GAPS_THREADS") or os.environ.get("SLURM_CPUS_PER_TASK") or 16)
 CHUNK_SIZE = 1_000_000
+# C2C search cap (m): 2017 points with no 2018 return within it get exactly this
+# distance instead of an exhaustive search through empty space. Every gap threshold is
+# far below it, so no gap changes. Part of the cache identity; 0 = uncapped. An uncapped
+# cache is still accepted for a capped run (see compatible_preparation).
+MAX_SEARCH_M = 50.0
+# source_c2c.bin: the 2017 cloud with its distances as a CloudCompare file, for viewing
+# only (~20 bytes per point). Nothing in the pipeline reads it.
+SAVE_CC_BIN = False
 
 # Step 2: gaps
 VOXEL_SIZE = 1.0
@@ -576,6 +584,25 @@ def semantic_preparation(config):
     return {key: value for key, value in config.items() if key not in ignored}
 
 
+def compatible_preparation(cached, requested):
+    """Whether a cache built with `cached` settings can serve a `requested` run.
+
+    Identical semantic settings always can. One relaxation: an uncapped cache serves
+    a capped request. Its distances are exact everywhere, so every decision at a
+    threshold below the cap is the same as from a capped cache (capping only replaces
+    distances beyond the cap with the cap itself).
+    """
+    cached, requested = semantic_preparation(cached), semantic_preparation(requested)
+    if cached == requested:
+        return True
+    distance_c, distance_r = cached.get("distance", {}), requested.get("distance", {})
+    if not (distance_c.get("max_search_dist") == 0 and distance_r.get("max_search_dist", 0) > 0):
+        return False
+    strip = lambda d: {k: v for k, v in d.items() if k != "max_search_dist"}
+    return ({**cached, "distance": strip(distance_c)}
+            == {**requested, "distance": strip(distance_r)})
+
+
 def preparation_identity(args, sources, references, transform):
     config = {
         "engine": "CloudComPy_exact_C2C",
@@ -583,7 +610,8 @@ def preparation_identity(args, sources, references, transform):
         "distance": {
             "direction": "pre_to_post",
             "local_model": "none",
-            "max_search_dist": 0,
+            # 0 = uncapped; otherwise farther points get exactly this distance.
+            "max_search_dist": float(getattr(args, "max_search_dist", 0.0) or 0),
         },
         "pre_paths": sorted(str(Path(p).resolve()) for p in args.pre),
         "post_paths": sorted(str(Path(p).resolve()) for p in args.post),
@@ -998,7 +1026,15 @@ def native_cloud(cc, name, xyz, shift, chunk_size):
         raise
 
 
-def exact_c2c(directory, xyz, reference, classification, shift, threads, chunk_size, cc):
+def exact_c2c(directory, xyz, reference, classification, shift, threads, chunk_size, cc,
+              max_search=0.0, save_bin=False):
+    """Exact nearest-neighbour C2C; with max_search > 0, farther points get exactly that.
+
+    Below the cap, capped and uncapped distances agree to float32 rounding (tested);
+    the cap only spares CloudComPy searching empty space for points far from any 2018
+    return. save_bin also writes source_c2c.bin, a CloudCompare file of the 2017 cloud
+    with its distances, for viewing only.
+    """
     pre = post = None
     try:
         pre = native_cloud(cc, "pre_c2c", xyz, shift, chunk_size)
@@ -1012,7 +1048,7 @@ def exact_c2c(directory, xyz, reference, classification, shift, threads, chunk_s
         field.fromNpArrayCopy(np.asarray(classification, dtype=np.float32))
         field.computeMinAndMax()
         params = cc.Cloud2CloudDistancesComputationParams()
-        params.maxSearchDist = 0.0
+        params.maxSearchDist = float(max_search)
         params.octreeLevel = 0
         params.multiThread = threads > 1
         params.maxThreadCount = threads
@@ -1023,7 +1059,11 @@ def exact_c2c(directory, xyz, reference, classification, shift, threads, chunk_s
         )
         if status != 1:
             raise RuntimeError(f"CloudComPy exact C2C failed with code {status}")
-        index = pre.getScalarFieldDic().get("C2C absolute distances", -1)
+        # Named "C2C absolute distances", or "...[<50]" when capped.
+        fields = pre.getScalarFieldDic()
+        index = next(
+            (i for name, i in fields.items() if name.startswith("C2C absolute distances")), -1
+        )
         if index < 0:
             raise RuntimeError(
                 "CloudComPy returned success without the named raw C2C scalar field"
@@ -1044,6 +1084,8 @@ def exact_c2c(directory, xyz, reference, classification, shift, threads, chunk_s
             distances[start : start + chunk_size] = values[start : start + chunk_size]
         del values
         distances.flush()
+        if not save_bin:
+            return
         pre.setCurrentDisplayedScalarField(index)
         binary = directory / "source_c2c.bin"
         temporary_binary = directory / ".source_c2c.bin"
@@ -1089,8 +1131,7 @@ def prepare(args):
     if destination.exists():
         manifest, _ = load_cache(destination)
         if (
-            semantic_preparation(manifest.get("preparation", {}))
-            != semantic_preparation(config)
+            not compatible_preparation(manifest.get("preparation", {}), config)
             or manifest.get("source_files") != sources
             or manifest.get("reference_files") != references
         ):
@@ -1180,6 +1221,8 @@ def prepare(args):
             args.threads,
             args.chunk_size,
             cc,
+            max_search=config["distance"]["max_search_dist"],
+            save_bin=getattr(args, "save_bin", False),
         )
         del reference
         (directory / "post.raw").unlink()
@@ -2045,6 +2088,7 @@ def prepare_site():
         post_transform=POST_TRANSFORM, dtm=DTM,
         coverage_resolution=COVERAGE_RESOLUTION, min_pre_returns=MIN_PRE_RETURNS,
         min_post_returns=MIN_POST_RETURNS, threads=THREADS, chunk_size=CHUNK_SIZE,
+        max_search_dist=MAX_SEARCH_M, save_bin=SAVE_CC_BIN,
     ))
     print(f"Cache {manifest['cache_id']}: {manifest['point_count']} pre points")
     return manifest

@@ -245,6 +245,10 @@ followed by `export LD_LIBRARY_PATH=~/libstdcxx/lib:$LD_LIBRARY_PATH` does the s
 SSH sessions whose X11 forwarding has no X server behind it. Any other script that imports
 CloudComPy directly needs the same setting.
 
+**Is the download complete?** `check_download.py` compares the LAS files on disk with the
+inventory (Maria campaigns by default, `--all` for every campaign). It flags files that
+are missing, much smaller than listed, or left as `.part`.
+
 ### EV1 on a Linux HPC
 
 ```bash
