@@ -85,6 +85,38 @@ What EV1 (untiled, 711 M points read) showed:
 Output: `work_units.gpkg` (polygons + attributes) and `work_units.csv`, which is the job
 list. Map it and check it before anything runs.
 
+**Built (`python/plan_units.py`, 2026-11-03).**
+- **How ownership works:** each 1 m column goes to the best-ranked pair whose CHM overlap
+  contains the column's centre. These are the same cells `canopy.py` uses for coverage.
+  The rule is stored as per-tile ownership rasters (`ownership/<tile>.tif`, uint16 pair
+  rank). A unit takes the 2017 points whose column it owns, so no point can fall into two
+  units, even on a polygon boundary.
+- **Outputs:** the unit polygons in `work_units.gpkg` are drawn from those rasters. Units
+  go to `$PR_GAPS_DATA/interim/work_units/`.
+- **Run time:** under 4 minutes locally.
+
+First plan, with the default ranking (`-same_block,-overlap_ha,days_between`):
+
+| | |
+|---|---|
+| Units | 2,440 units in 1,821 tiles. 1,444 tiles have one unit; at most 9 units share a tile |
+| Pairs | 225 of the 415 pairs own ground. Same-block pairs own 54,770 ha |
+| Unit size | median 15.6 ha. 480 units are under 1 ha (151 ha in total) |
+| Coverage | 58,944.4 ha against the both-flights CHM overlap of 58,947.8 ha (both in EPSG:32620), a 3.4 ha shortfall |
+| EV1 | `PR_5March2017_EV1 → PR_25April2018_EV1` owns all 926.18 ha of the untiled `ev1` study area, in 19 units |
+
+- **Coverage shortfall:** the 3.4 ha are pairs under 25 ha plus 1 m rasterising.
+  Measured in EPSG:32161, as in `pr_repeat_summary_chm.csv`, the same area is 0.25%
+  smaller (58,800.9 ha).
+- **The M2 test:** at the study-area edge, the untiled run clipped points to the polygon,
+  while units clip by column centre. The tiling-invariance comparison should therefore
+  drop the boundary columns.
+- **Small units:** the units under 1 ha are cheap but each one still costs a job. Batch
+  several units per array task if the per-job overhead turns out to matter.
+- **Altitude isn't available yet:** the "closer flight altitude" tie-breaker in D3 isn't
+  in the inventory; it's only in the metadata PDFs. Add it as a column of `pairs.csv` and
+  name it in `--rank`.
+
 ### 4.2 Retile once
 
 A Slurm array over the 3,067 LAS files. Each job streams one file once and writes its points
@@ -184,6 +216,16 @@ restartable through a done marker: a complete cache manifest or a finished outpu
 - **Status:** a `status.csv` built from the done markers shows what's left. Resubmitting
   a stage only runs unfinished tasks.
 - **Benchmark:** `sacct` per stage gives time and memory per unit, which updates the table.
+  - **Untiled EV1** (job 792239, 2026-11-03): 926 ha, 16 CPUs, steps 1 and 2 in one job.
+    It took 42 min and peaked at 42.8 GB. That is about 0.73 CPU-minutes and 46 MB per
+    hectare.
+  - **A 1 km² unit with a 50 m buffer** (121 ha read) scales to ~6 GB and ~5 min on 16
+    CPUs. The 16 GB request leaves room for denser forest.
+  - **Island scale:** 58,801 ha at that rate is about 720 CPU-hours. That is roughly 18 h
+    on one `R128C40` node, or 4–5 h on four.
+  - **Caveats:** these figures are an upper bound for step 1. The run read whole EV1
+    files beyond the overlap, and they include step 2. The `EV1` backfill of the lowest
+    2018 returns (job 792463) took 8.5 min and 3.4 GB.
 - **Reuse:** every task loads the GCC module, sets `LD_LIBRARY_PATH` and uses headless Qt,
   as in `run_canopy.sbatch`.
 - **Scheduler:** plain Slurm arrays with dependencies are enough. Snakemake would add file
@@ -223,7 +265,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 
 | Piece | Where | Notes |
 |---|---|---|
-| Work-unit planner | `python/plan_units.py` | Footprints and pairs from `derived/inventory/` |
+| Work-unit planner | `python/plan_units.py` | **Done.** Footprints and pairs from `derived/inventory/` (§4.1) |
 | Retiler | `python/retile.py` | One LAS file per task |
 | Per-unit mode for `canopy.py` | `canopy.py` (`--unit`) | Reuses `prepare` / `analyze_threshold`; half-open clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
 | Per-unit voxel export, cross-tile join, global attributes | `python/join_gaps.py` | Union-find over tile-edge voxels |
@@ -247,5 +289,5 @@ Known (2026-11-03):
 - The scratch purge policy is unknown, so nothing irreplaceable goes there.
 
 1. **D3** is under review (§3).
-2. **Benchmarks:** `sacct` Elapsed and MaxRSS from the untiled EV1 run. These replace the
-   §5 estimates until M3.
+2. **Benchmarks:** the untiled EV1 figures are in §5. M3 replaces them with per-unit
+   measurements.

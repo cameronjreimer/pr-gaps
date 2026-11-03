@@ -11,7 +11,7 @@
 #
 #SBATCH --job-name=backfill
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --mem=8G              # ev1 (327 M 2018 points): 8.5 min, 3.4 GB peak (2026-11-03)
 #SBATCH --output=%x-%j.out
 
 set -euo pipefail
