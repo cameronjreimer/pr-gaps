@@ -111,8 +111,28 @@ First plan, with the default ranking (`-same_block,-overlap_ha,days_between`):
 - **The M2 test:** at the study-area edge, the untiled run clipped points to the polygon,
   while units clip by column centre. The tiling-invariance comparison should therefore
   drop the boundary columns.
-- **Small units:** the units under 1 ha are cheap but each one still costs a job. Batch
-  several units per array task if the per-job overhead turns out to matter.
+- **Small units:** most of the units under 1 ha are real coverage edges, where only one
+  pair has data. Folding them into another pair in the same tile (tried 2026-11-04)
+  removed only 22 of the 377 multi-unit tiles, even at 10 ha. Instead, the planner packs
+  units into array tasks of about `--job-ha` hectares (default 100), by pair and then by
+  tile. This gives 764 tasks with a median of 2 units and 76 ha each. The `job` column of
+  `work_units.csv` is the Slurm array index.
+- **Pair borders:** there are about 251 km of borders between pairs inside tiles. That's
+  an overestimate, because the 1 m cells turn diagonal edges into staircases. They fall
+  in 335 tiles, and at most ~2,500 ha (4%) lie within 50 m of one. A gap that crosses a
+  border is measured with different flights on each side.
+  - **Detection can differ:** density, scan angle and registration all change at the
+    border.
+  - **Dates differ:** the two sides can have different flight dates.
+  - **Possible seams:** a pair-level offset could show up as a straight-line seam in the
+    gap map.
+  - **Planned checks:**
+    - record each gap's pair(s) and a `crosses_pair_border` flag;
+    - QC the ground C2C median per pair;
+    - in M3, run the lower-ranked pair over a strip of the higher pair's ground where
+      both have data, and compare the two gap maps (a between-flight null, like ADR
+      009's same-epoch null);
+    - compare gap fractions in bands on either side of each border.
 - **Altitude isn't available yet:** the "closer flight altitude" tie-breaker in D3 isn't
   in the inventory; it's only in the metadata PDFs. Add it as a column of `pairs.csv` and
   name it in `--rank`.
