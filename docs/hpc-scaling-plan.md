@@ -542,6 +542,23 @@ output. The files that run them are described in §5.1.
 
 *Design detailed 2026-11-16.*
 
+**Built (2026-11-16)** for the stages that exist (`retile`, `dtm`). The other stages are
+listed, and submitting one reports "not built yet". Tested locally by running tasks
+through `stage.sbatch` the way Slurm does:
+- logs and attempt records were written per task;
+- a failing task was recorded with its exit code;
+- after two failures, `status.py --pending` held it back, and `--retry-failed` let it
+  through;
+- a `submit.sh --dry-run` built the right `sbatch` lines (3,064 pending retile tasks,
+  `%40`).
+
+Two differences from the design below:
+- **Location:** task lists, logs, attempt records and `status.csv` live under
+  `$PR_GAPS_WORKFLOW` (default `$PR_GAPS_DATA/workflow/`), not in a run directory.
+- **Attempt records:** `stage.sbatch` appends a start record and an end record
+  (exit code, commit, log) per task to `attempts/<stage>/<task>.jsonl`. `status.py`
+  reads them alongside each stage's done markers.
+
 ```
 workflow/
   config.sh        paths (PR_GAPS_DATA, PR_GAPS_GLIHT, PR_GAPS_PLAN), the run's thresholds,
@@ -587,8 +604,8 @@ python/status.py   reads the done markers of every stage → status.csv and a su
 - **Retries:** none automatic. A failed task shows in `status.csv` with its log path,
   and the next `submit.sh` reruns it. A task that has failed twice is listed separately,
   so it gets investigated rather than resubmitted again.
-- **Logs:** `logs/<stage>/<task-key>.<jobid>_<index>.out`, one per task, under the run
-  directory.
+- **Logs:** `logs/<stage>/<task-key>.<jobid>_<index>.out`, one per task, under
+  `$PR_GAPS_WORKFLOW`.
 - **`status.csv`:** one row per stage and task, with the state (done, failed, pending,
   running from `squeue`), the code version that produced it, its wall time and peak
   memory from `sacct`, and the log path. The same numbers feed the benchmarks in this
@@ -647,7 +664,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) | §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
 | Step 2: unit voxels, tile labels, join, point labels | `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
 | Area accounting | `python/area.py` | §4.6. Coverage columns × pair × forest type × mask |
-| Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | §5.1–5.2. Named task lists; the code-version check |
+| Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | **Built** for `retile` and `dtm` (§5.1). A stage is added by giving it a command in `stage.sbatch` and a task list and done test in `status.py` |
 | QC report | `python/island_qc.py` | §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |
 | DTM check | `check_download.py --products dtm` | **Built.** §4.3 |
 
@@ -656,8 +673,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 2. `retile.py` and `campaign_dtm.py` (built);
 3. `canopy.py --job` → **M2 step-1 test on EV1**;
 4. `island_gaps.py` → **M2 step-2 test on EV1**;
-5. `workflow/` and `status.py`. These can be written alongside 2–4, and the EV1 tests
-   are their first real runs;
+5. `workflow/` and `status.py` (built). Each new stage is added to them as it is built;
 6. `area.py` and `island_qc.py`, before M4.
 
 ## 9. Afterwards: the recovery interval

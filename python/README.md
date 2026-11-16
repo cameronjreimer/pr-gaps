@@ -258,6 +258,27 @@ are missing, much smaller than listed, or left as `.part`. `--products dtm` chec
 | `retile.py <campaign>/<file>` | Cuts one LAS file into 1 km buckets, with `source_file` / `source_index` per point; `--list-tasks`, `--check [--deep]` | `$PR_GAPS_RETILED` (default `interim/retiled/`) |
 | `campaign_dtm.py` | One DTM per 2017 campaign: the downloaded raster, or its strips merged (never a published mosaic beside strips) | `interim/dtm/` and `index.csv` |
 
+### Running the island-wide stages on the cluster (hpc-scaling-plan.md §5.1)
+
+Commit and push the code here, then `git pull` on the cluster. The workflow refuses
+uncommitted code, so every output names the commit that made it. From `pr-gaps/`:
+
+```bash
+workflow/submit.sh --dry-run retile dtm   # see what would be submitted
+workflow/submit.sh retile dtm             # submit the arrays
+.venv/bin/python python/status.py         # progress: done / running / failed / pending
+```
+
+- **Resubmitting:** `submit.sh` submits only the tasks that aren't done or running, so
+  rerunning the same command after a failure resumes.
+- **Tasks that failed twice** are held back, with their log paths listed by
+  `status.py`. `--retry-failed` resubmits them.
+- **Settings:** paths, and each stage's CPUs, memory, time limit and concurrency, are in
+  `workflow/config.sh`.
+- **Where things go:**
+  - logs: `$PR_GAPS_WORKFLOW/logs/<stage>/` (default `$PR_GAPS_DATA/workflow/`);
+  - per-task detail: `status.csv` in the same folder.
+
 ### EV1 on a Linux HPC
 
 ```bash
