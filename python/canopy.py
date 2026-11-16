@@ -73,6 +73,10 @@ DATA = Path(os.environ.get("PR_GAPS_DATA") or REPO.parent / "data")
 # Campaign directories laid out as on the G-LiHT server: <campaign>/lidar/las/...
 # On the server, point this at the shared copy: /ibstorage/shared/PR_NASA_GLiHT
 GLIHT = os.environ.get("PR_GAPS_GLIHT") or str(DATA / "raw" / "gliht")
+# Island-wide work-unit plan (python/plan_units.py; hpc-scaling-plan.md §4.1) and the
+# LAS files cut into 1 km buckets per campaign (python/retile.py; §4.2).
+PLAN = Path(os.environ.get("PR_GAPS_PLAN") or DATA / "interim" / "work_units")
+RETILED = Path(os.environ.get("PR_GAPS_RETILED") or DATA / "interim" / "retiled")
 
 EV1_2017 = f"{GLIHT}/PR_5March2017_EV1"
 EV1_2018 = f"{GLIHT}/PR_25April2018_EV1"

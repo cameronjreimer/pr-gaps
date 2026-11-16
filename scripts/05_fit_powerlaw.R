@@ -34,12 +34,14 @@ N_SIM     <- 1000                  # 0 skips the simulation envelope
 
 ## --- Read gaps --------------------------------------------------------------
 gaps_dir <- file.path(gl_data_root(), "runs", "canopy", SITE, "gaps")
-if (is.null(RUN)) {
+csv_in <- function(run) file.path(gaps_dir, run, paste0("threshold_", THRESHOLD, "m"),
+                                  "gaps_covariates.csv")
+if (is.null(RUN)) {                # newest run that has covariates for THRESHOLD
   runs <- list.dirs(gaps_dir, recursive = FALSE)
+  runs <- runs[file.exists(csv_in(basename(runs)))]
   RUN  <- basename(runs[which.max(file.mtime(runs))])
 }
-csv <- file.path(gaps_dir, RUN, paste0("threshold_", THRESHOLD, "m"),
-                 "gaps_covariates.csv")
+csv <- csv_in(RUN)
 gaps <- read.csv(csv)
 x <- gaps[[SIZE_COL]]
 x <- x[is.finite(x) & x > 0]

@@ -145,6 +145,19 @@ First plan, with the default ranking (`-same_block,-overlap_ha,days_between`):
 once and writes the points into 1 km buckets per campaign. A unit then reads only the
 buckets it needs, instead of whole strip files that can run for kilometres.
 
+**Built (2026-11-16).** `python/retile.py`.
+- **Commands:** `retile.py <campaign>/<file>` for a task, `--list-tasks` for the
+  pending Maria files (3,067 in all), and `--check [--deep] CAMPAIGN`.
+- **Tested locally:** on Guayama (2 strips) and EV1 c4r2.
+  - Every dimension of every point is bit-identical to the raw file, matched through
+    `source_index`.
+  - Every point is in the right tile.
+  - `--check --deep` finds each record exactly once.
+  - Rerunning skips files that are done.
+- **Speed:** ~1.2 M points/s on one core (33.4 M points in 30 s). That's ~7 CPU-hours
+  island-wide.
+- **Size:** ~6.3 bytes per point as LAZ, ~195 GB island-wide.
+
 - **Scope: every LAS file of the Maria campaigns** (241 campaigns, 3,067 files), whether
   or not the current plan uses them.
   - This keeps the buckets independent of the pair ranking (D3), so re-ranking never
@@ -194,25 +207,49 @@ all 114 2017 campaigns that own ground: one file each, 5.8 GB compressed in tota
 
 | Campaign type | Count | DTM file | Preparation |
 |---|---|---|---|
-| Tiled (`cXrY`) | 12 | `lidar/geotiff/<campaign>_DTM.tif.gz`, already one mosaic | gunzip |
-| Strip (`lXsY`) | 102 | `lidar/geotiff/<campaign>_DTM.tar.gz`, one DTM per strip | untar, then merge the strips with `terra::merge` |
+| Tiled (`cXrY`) | 12 | `lidar/geotiff/<campaign>_DTM.tif.gz`, already one mosaic | used as is (the download unzips it) |
+| Strip (`lXsY`) | 102 | `lidar/geotiff/<campaign>_DTM.tar.gz`, one DTM per strip, plus a mosaic unless pruned | merge the strips, even when a published mosaic is there |
+
+**Built (2026-11-16).** `python/campaign_dtm.py`. It's in Python rather than R, so the
+cluster needs one environment, and its NaN handling is explicit.
+- **Merge rule:** each cell takes the first strip, in file-name order, with a finite
+  value. This is `terra::merge`'s rule. Strips that disagree where they overlap are
+  counted.
+- **Packed archives:** an archive the download left packed is unpacked next to it, and
+  the archive is kept.
+- **Output:**
+  - merges go to `$PR_GAPS_DATA/interim/dtm/<campaign>_DTM.tif` (float32, `NaN`
+    no-data, tiled, deflate);
+  - `interim/dtm/index.csv` maps each campaign to the DTM to use, along with its valid
+    cells and conflicts;
+  - a campaign whose sources haven't changed is skipped on rerun.
+- **Tested locally:** on 6 campaigns.
+  - The merges of Guayama and campaign 53 match the published mosaics cell for cell,
+    with identical valid cells, bounds and values.
+  - The packed archive of campaign 111 unpacked and merged.
+  - No strips overlapped or conflicted.
+- **Published mosaics can't be trusted.** The mosaic of
+  `PR_17March2017_BG_north_high_alt` is entirely NaN for every product (CHM, DTM, slope,
+  aspect), while its 10 strips hold 6.3 M valid cells. That's 1 of the 10 campaigns with
+  mosaics on disk locally. Hence the rule above: merge whenever strips exist, use a
+  mosaic only when there are none, and fail on a DTM with no valid cells.
+  The covariate helpers in `R/ingest/08_gliht_rasters.R` (`gl_gliht_raster`,
+  `gl_chm_for_rugosity`) used to prefer the mosaic, and fell back to a VRT. Since
+  2026-11-16 they follow the same rule through `gl_strip_raster`, using `terra::merge`,
+  and stop on a raster with no data.
+  - Tested: BG_north_high_alt now gives 6,293,522 DTM cells, the same as
+    `campaign_dtm.py`.
+  - Guayama's merged CHM matches its mosaic exactly.
 
 - **Not a VRT:** G-LiHT stores no-data as `NaN`, which a VRT turns into data (README).
-  The strips abut exactly, so the merge order doesn't matter.
-- **Output:** `$PR_GAPS_DATA/interim/dtm/<campaign>_DTM.tif`, float32, `NaN` no-data,
-  tiled and deflate-compressed, in the source CRS. `sample_hag` reprojects points if
-  needed. The 2018 DTMs aren't needed.
-- **Script:** `scripts/07_campaign_dtm.R`, an array of one task per campaign (or one
-  job: 114 small rasters). Each output is written to a temporary name and renamed when
-  complete.
+- **The 2018 DTMs aren't needed.** `sample_hag` reprojects points if a DTM's CRS
+  differs.
 - **Checks:**
-  - every 2017 campaign in `pairs.csv` with owned ground has an output;
-  - the valid-cell count of each merge equals the summed valid cells of its strips,
-    less any overlap;
-  - in step 1, the ground-return HAG median per unit is within ±0.3 m (as `check_run.py`
-    checks now).
-- **First, confirm the DTMs are on the cluster.** `check_download.py` only checks LAS
-  files so far. Extend it with `--products dtm`, and fetch any missing DTMs with
+  - every 2017 campaign with owned ground has a row in the index;
+  - valid cells = summed strip valid cells − overlap (reported per campaign);
+  - in step 1, the ground-return HAG median per unit is within ±0.3 m.
+- **DTMs on the cluster:** `check_download.py --products dtm` (built) reports each 2017
+  campaign as `mosaic`, `strips`, `archive` or missing. Fetch missing ones with
   `scripts/02_download.R --download all --products dtm`.
 
 ### 4.4 Step 1 per unit (`canopy.py --job`)
@@ -528,7 +565,7 @@ python/status.py   reads the done markers of every stage → status.csv and a su
   |---|---|---|
   | `plan` | – | `plan_units.py` (run once by hand; a new plan needs `--force`) |
   | `retile` | LAS file | `retile.py <file>` |
-  | `dtm` | 2017 campaign | `Rscript scripts/07_campaign_dtm.R <campaign>` |
+  | `dtm` | 2017 campaigns | `campaign_dtm.py` (one job) |
   | `step1` | job number | `canopy.py --job N` |
   | `voxels` | job number | `island_gaps.py voxels --job N` |
   | `label` | tile | `island_gaps.py label --tile T` |
@@ -605,18 +642,18 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | Piece | Where | Notes |
 |---|---|---|
 | Work-unit planner | `python/plan_units.py` | **Done.** Footprints and pairs from `derived/inventory/` (§4.1) |
-| Retiler | `python/retile.py` | One LAS file per task (§4.2) |
-| DTM mosaics | `scripts/07_campaign_dtm.R` | One 2017 campaign per task (§4.3); run `check_download.py --products dtm` first |
+| Retiler | `python/retile.py` | **Built.** One LAS file per task (§4.2) |
+| DTM mosaics | `python/campaign_dtm.py` | **Built.** §4.3; one job (114 small rasters) |
 | Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) | §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
 | Step 2: unit voxels, tile labels, join, point labels | `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
 | Area accounting | `python/area.py` | §4.6. Coverage columns × pair × forest type × mask |
 | Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | §5.1–5.2. Named task lists; the code-version check |
 | QC report | `python/island_qc.py` | §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |
-| DTM check | `check_download.py --products dtm` | §4.3. Small extension |
+| DTM check | `check_download.py --products dtm` | **Built.** §4.3 |
 
 **Build order:**
-1. `check_download.py --products dtm`;
-2. `retile.py` and `07_campaign_dtm.R`;
+1. `check_download.py --products dtm` (built);
+2. `retile.py` and `campaign_dtm.py` (built);
 3. `canopy.py --job` → **M2 step-1 test on EV1**;
 4. `island_gaps.py` → **M2 step-2 test on EV1**;
 5. `workflow/` and `status.py`. These can be written alongside 2–4, and the EV1 tests

@@ -20,19 +20,43 @@ gl_gliht_root <- function() {
 }
 
 ## One raster per G-LiHT product. Campaigns are unpacked either to a single
-## <campaign>_<P>.tif or to a <campaign>_<P>/ folder of strips plus a mosaic;
-## use the mosaic when there is one, else stitch the strips with a VRT.
+## <campaign>_<P>.tif or to a <campaign>_<P>/ folder of strips, plus a mosaic
+## unless it was pruned.
 gl_gliht_raster <- function(campaign, product) {
   dir <- file.path(gl_gliht_root(), campaign, "lidar", "geotiff")
   single <- file.path(dir, sprintf("%s_%s.tif", campaign, product))
-  if (file.exists(single)) return(terra::rast(single))
+  if (file.exists(single)) return(gl_checked_raster(terra::rast(single), single))
   tifs <- list.files(file.path(dir, sprintf("%s_%s", campaign, product)),
                      pattern = "[.]tif$", full.names = TRUE)
-  mosaic <- tifs[grepl("_mosaic_", basename(tifs))]
-  if (length(mosaic)) return(terra::rast(mosaic[1]))
-  if (length(tifs)) return(terra::vrt(tifs))
+  if (length(tifs)) return(gl_strip_raster(tifs))
   stop("no ", product, " raster for ", campaign, " under ", dir,
        " — download it with scripts/02_download.R")
+}
+
+## One raster from a folder of strip GeoTIFFs, with or without a published mosaic.
+##
+## WHY the strips, even when a mosaic sits beside them: published mosaics can be
+## empty. Every mosaic of PR_17March2017_BG_north_high_alt (CHM, DTM, slope,
+## aspect) is entirely NaN, while its 10 strips hold 6.3 M valid cells.
+## terra::merge reproduces the mosaics that are intact with zero mismatches
+## (05_download.R), so merging loses nothing. Never a VRT: NoData is NaN in every
+## G-LiHT raster and a VRT turns it into data (README).
+gl_strip_raster <- function(tifs) {
+  strips <- sort(tifs[!grepl("_mosaic_", basename(tifs))])
+  if (length(strips) == 1) return(gl_checked_raster(terra::rast(strips), strips))
+  if (length(strips)) {
+    merged <- terra::merge(terra::sprc(lapply(strips, terra::rast)))
+    return(gl_checked_raster(merged, dirname(strips[1])))
+  }
+  gl_checked_raster(terra::rast(tifs[1]), tifs[1])   # a mosaic with no strips
+}
+
+## Stop on a raster with no data at all, rather than letting it through as NA.
+gl_checked_raster <- function(r, source) {
+  if (!any(terra::global(!is.na(r), "max", na.rm = TRUE)[[1]] > 0)) {
+    stop("no valid cells in ", source)
+  }
+  r
 }
 
 ## ---------------------------------------------------------------------------
@@ -118,8 +142,7 @@ gl_chm_for_rugosity <- function(campaign, workdir) {
   }
   gl_extract(packed[1], workdir)                    # 01_http.R
   tifs <- list.files(workdir, pattern = "[.]tif$", recursive = TRUE, full.names = TRUE)
-  mosaic <- tifs[grepl("_mosaic_", basename(tifs))]
-  if (length(mosaic)) terra::rast(mosaic[1]) else if (length(tifs)) terra::vrt(tifs) else NULL
+  if (length(tifs)) gl_strip_raster(tifs) else NULL
 }
 
 ## Where a campaign's rugosity raster lives. It stays in the campaign's own CRS

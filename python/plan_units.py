@@ -19,7 +19,7 @@ EPSG:32620), and tiles are whole kilometres in that CRS, so a 2017 point belongs
 exactly one unit: the one owning its column. The ownership rasters are the rule; the
 unit polygons are drawn from them, for maps.
 
-Writes to --out (default $PR_GAPS_DATA/interim/work_units/):
+Writes to --out (default $PR_GAPS_PLAN, else $PR_GAPS_DATA/interim/work_units/):
   work_units.csv   the job list: unit id, job (Slurm array index), tile, pair, campaigns,
                    area, cell bounds
   pairs.csv        every pair with its rank, overlap and owned area
@@ -50,7 +50,7 @@ from shapely.geometry import shape
 from shapely.ops import unary_union
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from canopy import DATA, REPO  # noqa: E402
+from canopy import PLAN, REPO  # noqa: E402
 
 INVENTORY = REPO / "derived" / "inventory"
 FOOTPRINTS = INVENTORY / "pr_footprints_chm.gpkg"
@@ -193,7 +193,7 @@ def main():
                         help=f"comma-separated ranking keys, '-' = descending (default {DEFAULT_RANK})")
     parser.add_argument("--min-overlap-ha", type=float, default=25.0)
     parser.add_argument("--epochs", nargs=2, default=("2017_pre", "2018_post"))
-    parser.add_argument("--out", type=Path, default=DATA / "interim" / "work_units")
+    parser.add_argument("--out", type=Path, default=PLAN)
     parser.add_argument("--job-ha", type=float, default=100.0,
                         help="pack units into array tasks of about this many hectares (default 100)")
     parser.add_argument("--force", action="store_true", help="replace an existing plan")

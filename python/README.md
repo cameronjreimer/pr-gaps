@@ -247,7 +247,16 @@ CloudComPy directly needs the same setting.
 
 **Is the download complete?** `check_download.py` compares the LAS files on disk with the
 inventory (Maria campaigns by default, `--all` for every campaign). It flags files that
-are missing, much smaller than listed, or left as `.part`.
+are missing, much smaller than listed, or left as `.part`. `--products dtm` checks the
+2017 DTMs instead (`--products las,dtm` for both).
+
+### Island-wide inputs (hpc-scaling-plan.md §4.1–4.3)
+
+| Script | What it does | Writes |
+|---|---|---|
+| `plan_units.py` | Gives each 1 m column to one 2017 → 2018 pair, cuts the result into 1 km work units, and packs them into array jobs | `$PR_GAPS_PLAN` (default `interim/work_units/`) |
+| `retile.py <campaign>/<file>` | Cuts one LAS file into 1 km buckets, with `source_file` / `source_index` per point; `--list-tasks`, `--check [--deep]` | `$PR_GAPS_RETILED` (default `interim/retiled/`) |
+| `campaign_dtm.py` | One DTM per 2017 campaign: the downloaded raster, or its strips merged (never a published mosaic beside strips) | `interim/dtm/` and `index.csv` |
 
 ### EV1 on a Linux HPC
 
