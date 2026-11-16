@@ -2,6 +2,7 @@
 
     python python/plan_units.py                         # Maria pairs, default ranking (D3)
     python python/plan_units.py --rank=-same_block,-overlap_ha,days_between
+    python python/plan_units.py --min-unit-ha 1    # fold slivers under 1 ha into a pair already in the tile
     python python/plan_units.py --out DIR --force
 
 hpc-scaling-plan.md §4.1. Every pair (>= --min-overlap-ha in the inventory) gets the
@@ -127,19 +128,48 @@ def tiles_touching(geometries):
     return sorted(corners)
 
 
-def own_tile(x0, y0, ranked, overlaps, tree):
-    """uint16 rank per column of one tile: the best-ranked pair whose overlap holds its centre."""
+def own_tile(x0, y0, ranked, overlaps, tree, min_cells=0):
+    """uint16 rank per column of one tile: the best-ranked pair whose overlap holds its centre.
+
+    With min_cells, a pair owning fewer columns than that in the tile hands them all to
+    pairs already owning ground in the tile that cover them (best-ranked first), so the
+    tile has one unit fewer. A sliver goes only if every column of it can go. Returns the
+    ownership, its transform, and a mask of the columns handed on this way (all of them
+    now owned by a lower-ranked pair than D3 prefers).
+    """
     size = TILE_M // CELL_M
     transform = from_origin(x0, y0 + TILE_M, CELL_M, CELL_M)
     owner = np.zeros((size, size), np.uint16)
+    covers = {}
     for index in sorted(tree.query(box(x0, y0, x0 + TILE_M, y0 + TILE_M))):
         piece = clip_by_rect(overlaps[index], x0, y0, x0 + TILE_M, y0 + TILE_M)
         if piece.is_empty or piece.area == 0:
             continue
         inside = rasterize([(piece, 1)], out_shape=owner.shape, transform=transform,
                            fill=0, dtype=np.uint8, all_touched=False).astype(bool)
-        owner[inside & (owner == 0)] = ranked["rank"].iat[index]
-    return owner, transform
+        rank = int(ranked["rank"].iat[index])
+        covers[rank] = inside
+        owner[inside & (owner == 0)] = rank
+    absorbed = np.zeros(owner.shape, bool)
+    changed = min_cells > 0
+    while changed:
+        changed = False
+        ranks, counts = np.unique(owner[owner > 0], return_counts=True)
+        for rank, count in sorted(zip(ranks.tolist(), counts.tolist()), key=lambda rc: (rc[1], rc[0])):
+            if count >= min_cells or len(ranks) < 2:
+                break
+            sliver = owner == rank
+            others = [other for other in ranks.tolist() if other != rank]
+            if not np.logical_or.reduce([covers[other] for other in others])[sliver].all():
+                continue
+            absorbed |= sliver
+            for other in others:  # ascending rank: best pair first
+                take = sliver & covers[other]
+                owner[take] = other
+                sliver &= ~take
+            changed = True
+            break
+    return owner, transform, absorbed
 
 
 def write_ownership(path, owner, transform):
@@ -157,6 +187,9 @@ def main():
     parser.add_argument("--min-overlap-ha", type=float, default=25.0)
     parser.add_argument("--epochs", nargs=2, default=("2017_pre", "2018_post"))
     parser.add_argument("--out", type=Path, default=DATA / "interim" / "work_units")
+    parser.add_argument("--min-unit-ha", type=float, default=0.0,
+                        help="hand a pair's piece of a tile smaller than this to pairs already in "
+                             "the tile that cover it (default 0: pure D3 ranking)")
     parser.add_argument("--force", action="store_true", help="replace an existing plan")
     args = parser.parse_args()
     keys = [key.strip() for key in args.rank.split(",") if key.strip()]
@@ -182,8 +215,9 @@ def main():
     print(f"ranked by {', '.join(keys)}; {len(corners)} candidate 1 km tiles")
     units, pieces = [], {rank: [] for rank in ranked["rank"]}
     tile_rows = []
+    min_cells = int(np.ceil(args.min_unit_ha * 1e4 / CELL_M**2))
     for x0, y0 in corners:
-        owner, transform = own_tile(x0, y0, ranked, overlaps, tree)
+        owner, transform, absorbed = own_tile(x0, y0, ranked, overlaps, tree, min_cells)
         if not owner.any():
             continue
         tile = tile_id(x0, y0)
@@ -201,6 +235,8 @@ def main():
                 "campaign_pre": pair.campaign_a, "campaign_post": pair.campaign_b,
                 "block_pre": pair.block_a, "block_post": pair.block_b,
                 "n_columns": int(mask.sum()), "area_ha": mask.sum() * CELL_M**2 / 1e4,
+                # ground taken over from a better-ranked pair's sliver (--min-unit-ha)
+                "absorbed_ha": int((mask & absorbed).sum()) * CELL_M**2 / 1e4,
                 # cell bounds, half-open: xmin <= x < xmax
                 "xmin": x0 + int(cols.min()) * CELL_M, "xmax": x0 + (int(cols.max()) + 1) * CELL_M,
                 "ymin": y0 + TILE_M - (int(rows.max()) + 1) * CELL_M,
@@ -230,18 +266,23 @@ def main():
     expected = float(repeat[repeat.epochs == " + ".join(args.epochs)].to_crs(LAS_CRS).area.sum() / 1e4)
     total = float(units.area_ha.sum())
     slivers = units[units.area_ha < SLIVER_HA]
+    n_multi = int((units.groupby("tile").size() > 1).sum())
     plan = {
         "created_by": "python/plan_units.py", "rank": keys, "min_overlap_ha": args.min_overlap_ha,
-        "epochs": list(args.epochs), "tile_m": TILE_M, "cell_m": CELL_M, "crs": LAS_CRS,
+        "min_unit_ha": args.min_unit_ha, "epochs": list(args.epochs), "tile_m": TILE_M, "cell_m": CELL_M, "crs": LAS_CRS,
         "inventory": [signature(p) for p in (FOOTPRINTS, PAIRS, CAMPAIGNS)],
         "n_pairs": len(ranked), "n_pairs_owning": int((ranked.owned_ha > 0).sum()),
         "n_tiles": len(tile_rows), "n_units": len(units), "owned_ha": total,
         "expected_ha": expected, "n_units_below_1ha": len(slivers),
+        "n_multi_unit_tiles": n_multi, "absorbed_ha": float(units.absorbed_ha.sum()),
     }
     (args.out / "plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
 
     print(f"{len(units):,} units in {len(tile_rows):,} tiles; {plan['n_pairs_owning']} of "
-          f"{len(ranked)} pairs own ground")
+          f"{len(ranked)} pairs own ground; {n_multi:,} tiles have more than one unit")
+    if args.min_unit_ha:
+        print(f"--min-unit-ha {args.min_unit_ha:g}: {plan['absorbed_ha']:,.1f} ha handed from "
+              "slivers to a lower-ranked pair already in the tile")
     print(f"owned {total:,.1f} ha vs {expected:,.1f} ha both-flights CHM overlap, both in "
           f"{LAS_CRS} ({total - expected:+,.1f} ha: pairs under {args.min_overlap_ha:g} ha "
           "and 1 m rasterising)")
