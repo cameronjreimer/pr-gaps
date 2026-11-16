@@ -45,12 +45,12 @@ What EV1 (untiled, 711 M points read) showed:
    count gaps twice and double the point density (confound 2). **Fix: each location gets
    exactly one 2017 → 2018 pair (§4.1).**
 3. **Gaps crossing tile edges.** Per-tile labelling with per-tile minimum-size filters would
-   split and drop edge gaps. **Fix: label after merging (§4.4).**
+   split and drop edge gaps. **Fix: label after merging (§4.5).**
 4. **Storage.** The prototype cache costs ~68 bytes per 2017 point, about 0.9 TB
    island-wide (§6).
 5. **One global labelling step won't fit.** LFDP has 7,500 changed voxels per ha at 3 m.
    Island-wide that's ~440 M voxels at 3 m and ~1 billion at 2 m, too many for one sparse
-   graph. **Fix: label per tile, then join across tile edges (§4.4).**
+   graph. **Fix: label per tile, then join across tile edges (§4.5).**
 
 ## 3. Decisions needed before building
 
@@ -139,51 +139,267 @@ First plan, with the default ranking (`-same_block,-overlap_ha,days_between`):
 
 ### 4.2 Retile once
 
-A Slurm array over the 3,067 LAS files. Each job streams one file once and writes its points
-into per-campaign 1 km buckets: `$SCRATCH/retiled/<campaign>/<tile>.laz` (LAZ via `lazrs`).
-It keeps only the attributes the pipeline uses: xyz, classification, and return number and
-scan angle in case D1 is adopted. A unit then reads its 2017 bucket and the 3 × 3 2018
-buckets around it.
+*Design detailed 2026-11-16.*
 
-- **Compute:** about 31 billion points at ~0.5 M points/s is ~18 core-hours, a few tens of
-  minutes as an array.
-- **Disk:** ~250–310 GB of LAZ on scratch. It can be regenerated from `raw/`.
-- **Checks:** per-file point counts in = out, and no point written twice.
+**What it does.** A Slurm array runs one task per LAS file. Each task streams its file
+once and writes the points into 1 km buckets per campaign. A unit then reads only the
+buckets it needs, instead of whole strip files that can run for kilometres.
 
-### 4.3 Step 1 per unit
+- **Scope: every LAS file of the Maria campaigns** (241 campaigns, 3,067 files), whether
+  or not the current plan uses them.
+  - This keeps the buckets independent of the pair ranking (D3), so re-ranking never
+    means retiling again.
+  - It costs a little disk for ground no pair owns. The quota isn't limiting.
+- **Tiles:** the same 1 km grid as the work units, in EPSG:32620 with half-open edges:
+  `tile = floor(x / 1000), floor(y / 1000)`. Every point lands in exactly one tile.
+- **No write collisions:** neighbouring strips of one campaign cover the same tile. If
+  tasks shared one file per tile, they would write to it at the same time. Instead each
+  task writes its own part per tile:
+  ```
+  $PR_GAPS_DATA/interim/retiled/<campaign>/<tile>/<source-file-stem>.laz
+  ```
+  A unit reads every part in its tile folder.
+- **Points and attributes kept:**
+  - every point and every class, unchanged. The noise filters (classes 7/18) stay
+    where they are now, in `canopy.py`;
+  - the source point format, scale and offset, so coordinates are bit-identical to the
+    raw file. The M2 tiling test depends on that;
+  - two extra-byte fields, `source_file` (the file's index in a per-campaign file
+    list, `retiled/<campaign>/files.csv`) and `source_index` (the record number in
+    that file). These are what `canopy.py`'s cache stores, so per-unit caches keep
+    pointing at the original LAS files. `check_run.py --compare` and the
+    duplicate-point check depend on them.
+- **Format:** LAZ through `lazrs`, written in chunks, with one writer open per tile the
+  file touches (typically 5–30 for a strip).
+- **Done marker:** each task writes `retiled/<campaign>/done/<source-file-stem>.json`
+  last. It holds the source file's signature (size, mtime), its header point count, and
+  the points written per tile. A resubmitted array skips files whose marker matches.
+  A killed task leaves no marker, and its parts are overwritten on the rerun.
+- **Checks:**
+  - per file, the points written sum to the header count;
+  - per campaign, the bucket totals equal the sum over its files;
+  - `source_index` runs 0…n−1 exactly once per file, so no point is lost or duplicated.
+- **Compute:** about 31 billion points at ~0.5 M points/s is ~18 CPU-hours. As an array
+  (1 CPU, 4 GB per task) that's a few tens of minutes.
+- **Disk:** ~250–310 GB on project storage (§6). It can be regenerated from `raw/`.
+  Delete it after M5.
 
-`canopy.py --unit <id>`: an extension of the current single-site run, with the same cache
-format and provenance.
+### 4.3 Per-campaign DTMs (for height above ground)
 
-- **2017 points:** the unit's bucket, clipped to its polygon with the half-open tile rule.
-- **2018 reference:** the 3 × 3 buckets, clipped to the polygon's bounding box + B.
-- **Distances:** C2C as now, capped at B if D2 is adopted.
-- **HAG:** from that 2017 campaign's DTM. Merge its strips with `terra::merge` once per
-  campaign, not with a VRT (README: NaN no-data).
-- **Caching:** one cache per unit; a unit with a complete cache is skipped on rerun.
+*Design detailed 2026-11-16.*
 
-### 4.4 Step 2: per unit, then joined
+**What it does.** It gives each 2017 campaign a single DTM file. Height above ground
+comes from the 2017 campaign's own DTM, as in the prototype. The inventory has a DTM for
+all 114 2017 campaigns that own ground: one file each, 5.8 GB compressed in total.
 
-1. **Per unit:** write changed voxels in global indices at every threshold in the run
-   (primary plus sensitivity set): per-voxel point counts at each threshold, distance and
-   HAG sums, min and max. No labelling or size filters yet.
-2. **Label within each tile** using the existing labelling code.
-3. **Join across tile edges:** compare only voxels in the outermost layer of each tile with
-   their neighbours across the edge. Union-find over (tile, local label) pairs gives global
-   gap IDs. This scales with tile-edge length, not with the island.
-4. **Gap attributes:** combine per-tile partial sums by global ID. Means come from summed
-   counts and sums. Only gaps that cross a tile edge need their voxels gathered for
-   footprint and convex-hull volume.
-5. **Apply the minimum-size filters** to the joined gaps.
-6. **Exports:**
-   - one GeoPackage of gap footprints per campaign block, reprojected to EPSG:32161 for the
-     covariate scripts;
-   - LAZ per tile;
-   - the global gap table as Parquet.
-7. **The seeded split** (an ADR 009 sensitivity run) needs growth across tile edges. Run it
-   only on the prototype windows and whole blocks that fit one job, not island-wide.
+| Campaign type | Count | DTM file | Preparation |
+|---|---|---|---|
+| Tiled (`cXrY`) | 12 | `lidar/geotiff/<campaign>_DTM.tif.gz`, already one mosaic | gunzip |
+| Strip (`lXsY`) | 102 | `lidar/geotiff/<campaign>_DTM.tar.gz`, one DTM per strip | untar, then merge the strips with `terra::merge` |
 
-### 4.5 Post-processing (masking after C2C)
+- **Not a VRT:** G-LiHT stores no-data as `NaN`, which a VRT turns into data (README).
+  The strips abut exactly, so the merge order doesn't matter.
+- **Output:** `$PR_GAPS_DATA/interim/dtm/<campaign>_DTM.tif`, float32, `NaN` no-data,
+  tiled and deflate-compressed, in the source CRS. `sample_hag` reprojects points if
+  needed. The 2018 DTMs aren't needed.
+- **Script:** `scripts/07_campaign_dtm.R`, an array of one task per campaign (or one
+  job: 114 small rasters). Each output is written to a temporary name and renamed when
+  complete.
+- **Checks:**
+  - every 2017 campaign in `pairs.csv` with owned ground has an output;
+  - the valid-cell count of each merge equals the summed valid cells of its strips,
+    less any overlap;
+  - in step 1, the ground-return HAG median per unit is within ±0.3 m (as `check_run.py`
+    checks now).
+- **First, confirm the DTMs are on the cluster.** `check_download.py` only checks LAS
+  files so far. Extend it with `--products dtm`, and fetch any missing DTMs with
+  `scripts/02_download.R --download all --products dtm`.
+
+### 4.4 Step 1 per unit (`canopy.py --job`)
+
+*Design detailed 2026-11-16.*
+
+**What it does.** It extends the current single-site run: same distance code, same cache
+format and provenance. Only the inputs change, from site lists to plan units.
+
+- **Invocation:**
+  - `canopy.py --job N` runs every unit whose `job` is N in `work_units.csv`, one after
+    another. This is the step-1 array.
+  - `canopy.py --unit <id>` runs one unit, for debugging.
+  - The plan directory comes from `PR_GAPS_PLAN` (default
+    `$PR_GAPS_DATA/interim/work_units`).
+- **2017 points:** the parts in `retiled/<campaign_pre>/<tile>/`. A point is kept if its
+  1 m column `(floor(x), floor(y))` holds this unit's rank in `ownership/<tile>.tif`.
+  The ownership mask replaces the prototype's study-area polygon, so ownership is exact
+  at pair and tile edges.
+- **2018 reference:** the parts in `retiled/<campaign_post>/<tile>/` for every tile that
+  the unit's cell bounds plus 50 m (B) touch, usually 1–4 tiles. They are clipped to that
+  box, not to the owned columns, so edge points find their true nearest 2018 neighbour,
+  as in the prototype.
+- **Coverage:** 1 m cells with both 2017 and 2018 returns of this pair, restricted to the
+  unit's owned columns. Summed over units, this is the island's analysed area and the
+  denominator for area accounting (§4.6).
+- **Unchanged from the prototype:**
+  - exact C2C capped at 50 m (D2);
+  - the lowest 2018 return per column, kept for owned columns only;
+  - HAG from `interim/dtm/<campaign_pre>_DTM.tif`.
+- **Cache:** `$PR_GAPS_DATA/runs/canopy/units/<unit>/cache/`. Its identity adds three
+  things to the current config hash:
+  - the unit's pair and cell bounds;
+  - a hash of its own owned-column mask, not the whole plan;
+  - the signatures of the bucket parts it read.
+
+  Re-ranking pairs (D3) then invalidates only the units whose columns actually changed.
+  A complete cache is skipped on rerun.
+- **Provenance:** `source_file` / `source_index` come from the bucket extra bytes and
+  are mapped back to the original LAS paths. A unit cache therefore looks like a
+  prototype cache, and `check_run.py` and `--compare` work on it unchanged.
+- **Failures within a job:**
+  - each unit is written atomically, as now;
+  - if one unit fails, the job logs it, carries on with the rest, and exits non-zero at
+    the end. A resubmit reruns only the incomplete units.
+- **Edge cases:**
+  - **No 2017 points in the owned columns** (a sliver at a data hole): write a complete
+    cache with zero points, so it isn't retried forever.
+  - **No 2018 return within 50 m:** points get 50.0 (D2), as now.
+- **Resources:** 8 CPUs and 16 GB per task to start (§5). The pilot (M3) measures actual
+  use.
+- **The M2 test:** run tiled EV1, i.e. the 19 units of the EV1 pair (rank 30), and
+  compare with the untiled `ev1` cache using `check_run.py --compare`. Leave out columns
+  on the edge of the old study-area polygon, because the prototype clipped by polygon
+  and units clip by column centre. Pass: every other shared point has the same distance
+  to float32 rounding (≤ 1 mm), and no point is missing or appears twice.
+
+### 4.5 Step 2: per unit, per tile, then joined
+
+*Design detailed 2026-11-16.*
+
+**Decisions (2026-11-16):**
+- **Pair borders:** a gap crossing one stays one gap. It records its pairs and a
+  `crosses_pair_border` flag.
+- **Edge gaps:** a gap cut off at the edge of the data is kept and flagged.
+- **Island-wide outputs:** footprint polygons only. The convex-hull volume
+  (`gap_volume_m3`) and the gap LAZ are dropped island-wide. The occupied-voxel volume
+  stays. The prototype sites keep both, and gap LAZ can be made on demand for chosen
+  tiles.
+
+**Fixed by ADR 009 and D5:**
+- **Thresholds:** voxel exports cover all four candidates, {2, 3, 4, 5} m, so the
+  primary run and every sensitivity run (T ± 1, 6-connectivity, the extent product at
+  2–3 m) come from the same exports.
+- **Gap rules:** 26-connectivity, plain connected components, `MIN_POINTS` = 10, and the
+  classes 2/7/18 excluded, as in the prototype.
+- **Point labels:** kept for every threshold.
+- **The seeded split:** run only on the 25 ha windows and on blocks that fit in one job.
+
+#### Stages
+
+| Stage | Array over | Reads | Writes |
+|---|---|---|---|
+| 2a. Unit voxels | step-1 jobs (764) | the unit cache | per-unit voxel tables, one per threshold; per-unit coverage columns |
+| 2b. Tile labels | tiles (1,821) | the tile's unit voxels; coverage of the 3 × 3 tiles around it | local labels, per-label partial sums, edge voxels, footprint pieces |
+| 2c. Join | one job per threshold | every tile's edge voxels and partial sums | global gap IDs, the gap table, footprint GeoPackages |
+| 2d. Point labels | step-1 jobs (764) | the unit cache, the tile labels, the ID map | per-unit point labels with global gap IDs |
+
+Outputs go under `$PR_GAPS_DATA/runs/canopy/island/<run-id>/`. The run ID hashes the
+settings, the code version and the plan, as the prototype's run IDs do. Each stage writes
+a done marker per task, so resubmits only run what's missing.
+
+#### 2a. Unit voxels
+
+- **Which points are changed:** at threshold T, a 2017 point is changed if it is
+  covered, not class 2/7/18, and its distance is ≥ T. These are the same eligibility
+  rules as `_eligibility`.
+- **Voxels:** global 1 m indices, `(ix, iy, iz) = floor(xyz)` (origin 0,0,0), stored as
+  int32. A column belongs to exactly one unit, so no voxel ever appears in two units and
+  tile tables can simply be concatenated.
+- **Per voxel and threshold:**
+  - the point count;
+  - the sum and max of the distances;
+  - the count, sum, min and max of the heights above ground;
+  - the sums of point x, y and z, measured from the tile corner so the sums stay
+    precise.
+
+  Every gap attribute is either a sum, a min or a max of these, so gap values combine
+  exactly across tiles.
+- **Coverage:** the unit's covered 1 m columns go into `coverage/<tile>.tif` (uint8),
+  merged across all units in the tile. Stage 2b uses this to tell where the data ends.
+
+#### 2b. Tile labels
+
+- **Labelling:** concatenate the tile's unit voxels and label them with the existing
+  26-connected `_components`. A tile at 2 m holds ~1–2 M voxels, a few seconds of work.
+  The size filter is *not* applied yet: a small piece here may be part of a big gap in
+  the next tile.
+- **Per local label:**
+  - partial sums: points, voxels, centroid sums, distance and height sums, min and max,
+    bounds;
+  - the number of footprint columns;
+  - points per pair, so a gap knows which flights measured it.
+- **Edge voxels:** voxels in the outermost ring of columns on each of the tile's four
+  sides, with their local labels. With 26-connectivity, a voxel touches the 8
+  neighbouring tiles, the diagonal ones included, so the corner columns matter.
+- **Coverage edge:** a gap's column touches the edge of the data when one of its 8
+  neighbouring columns in xy is uncovered. This is read from the 3 × 3 coverage tiles,
+  so it works across tile edges. Record `edge_columns` per label.
+- **Footprint pieces:** polygonise each label's occupied columns within the tile.
+
+#### 2c. Join (one job per threshold)
+
+- **Edges:** for each pair of tiles sharing a side or a corner, match their edge voxels
+  with 26-connectivity. Each match links (tile, label) to (tile, label).
+- **Union-find** over those links gives one global gap per connected group. This scales
+  with tile-edge length (~1,821 tiles × ~4,000 edge columns), not with the island.
+- **Global IDs:** gaps are numbered in a fixed order, by their lowest (ix, iy, iz) voxel,
+  as `_number_by_first_cell` does. The same inputs therefore always give the same IDs.
+  IDs are uint32, with 0 meaning "no gap".
+- **Gap attributes:** combine the partial sums by global ID. Means come from summed sums
+  and counts, and min, max and bounds combine directly. The result matches the
+  prototype's attributes, except `gap_volume_m3`, which is dropped.
+- **Pairs:** `n_pairs`, `main_pair_rank`, `main_pair_share` (the share of points from the
+  main pair) and `crosses_pair_border` (true when `n_pairs` > 1).
+- **Edge flag:** `touches_coverage_edge` and `edge_columns`.
+- **Then the size filter:** gaps with fewer than 10 points are removed after the join,
+  so a big gap cut by tile edges is never dropped piece by piece.
+- **Summary:** per threshold, the number of gaps, the total voxel volume and the largest
+  gap's share. The same summary is reported per 25 ha window for ADR 009's separation
+  test.
+
+#### 2d. Point labels
+
+For each unit and threshold, map every changed point to its gap's global ID through
+voxel → local label → global ID. Points in gaps removed by the size filter get 0. Write
+`units/<unit>/labels_<T>m.npy` (uint32, aligned with the unit cache). That is ~4 bytes
+per 2017 point per threshold, as in D5.
+
+#### Exports
+
+- **`gaps.parquet` per threshold:** the island-wide gap table, one row per gap.
+- **Footprint GeoPackages per threshold:** one file per 2017 campaign block, with gaps
+  assigned by their main pair. Footprints of gaps that cross tiles are dissolved from
+  their pieces. They stay in EPSG:32620 with the same layer name (`footprints`) and
+  attributes as now, so `scripts/04_gap_covariates.R` reads them unchanged.
+
+#### Checks
+
+- **Conservation:** per threshold, the points and voxels summed over all gaps (before
+  the size filter) equal the totals summed over the unit voxel tables. The labelled
+  points in 2d equal the gap table's point total.
+- **No duplicates:** each (tile, label) maps to exactly one global gap.
+- **The M2 test (with the step-1 test in §4.4):** run tiled EV1 through step 2 and
+  compare with the untiled `ev1` gaps at 2 m and 5 m. Leave out gaps that touch the old
+  study-area edge. Every other gap must have the same voxels, point count and attributes;
+  only its ID may differ. This proves that a gap cut by tile edges is put back together
+  exactly.
+
+#### Resources (estimates until M3)
+
+- **2a and 2d:** 2 CPUs and 8 GB per job.
+- **2b:** 1–2 CPUs and 4 GB per tile.
+- **2c:** 8 CPUs and up to 64 GB. About 8–9 M gaps at 2 m if EV1's density (133,765
+  gaps on 926 ha) holds island-wide.
+
+### 4.6 Post-processing (masking after C2C)
 
 - **Forest fraction per gap:** Hansen per ADR 007, plus C-CAP for the comparison. This
   extends `scripts/04_gap_covariates.R` with the pre-registered keep rule (e.g. forest
@@ -192,8 +408,25 @@ format and provenance.
 - **Area accounting:** both-flights coverage (from per-unit coverage cells) ∩ forest mask,
   per forest type. This is the denominator for gap density and damage per hectare
   (plan §2.10). It also records the area each step removes.
+  - **Inputs:** the per-tile coverage rasters from step 2a (1 m, covered or not), the
+    ownership rasters (which pair), the forest mask (Hansen per ADR 007, C-CAP for the
+    comparison) and the forest-type layer the covariate script already uses
+    (`interim/holdridge`).
+  - **Method:** per tile, resample the mask and forest types to the 1 m grid by
+    nearest neighbour, then count columns per pair × forest type × mask class. Sums
+    are exact, because each column is owned once.
+  - **Output:** `areas.csv` with one row per pair × forest type. Columns:
+    - `owned_ha`, the work-unit area;
+    - `covered_ha`, with both flights' returns;
+    - `forest_ha`, covered and forest under Hansen;
+    - `forest_ccap_ha`, covered and forest under C-CAP.
 
-### 4.6 Quality control
+    Each column is the area left after one step, so the table records what each step
+    removes. Summed by forest type, it gives the denominators.
+  - **Script:** `python/area.py`, one job, run after `voxels`. It doesn't need the gap
+    outputs.
+
+### 4.7 Quality control
 
 - **Per unit:** `check_run.py` checks, plus the ground HAG median (±0.3 m) and the ground
   C2C median.
@@ -206,19 +439,41 @@ format and provenance.
   - gap area fraction per tile;
   - the share of the largest gap per tile.
 - **Spot checks:** a few dozen of the largest gaps against orthophotos.
+- **The island QC report** (`python/island_qc.py`, the last stage) collects all of the
+  above into `qc/` under the run directory:
+  - **`units.csv`:** the per-unit `check_run.py` results, one row per unit, with
+    PASS/WARN/FAIL per check. It is the same check code, run on each unit cache.
+  - **`pairs.csv`:** registration per pair: the ground-return C2C median and p95, the
+    ground HAG median, the share of distances at the 50 m cap, and covered hectares.
+  - **`tiles.gpkg`:** one polygon per tile, carrying the map values above. The gap
+    fraction and largest-gap share come per threshold.
+  - **`checks.txt`:** the island-wide checks, namely the conservation checks of §4.2
+    and §4.5, no `(file, record)` in two units, and every task done with one code
+    version.
+- **Flags:** QC flags without excluding anything; excluding a pair or tile is a decision
+  recorded in the plan, not something a script does.
+  - **Registration:** a pair whose ground C2C median is over 0.5 m, or whose ground HAG
+    median is outside ±0.3 m. For scale, LFDP and EV1 were 0.20–0.21 m and −0.05 m.
+  - **Missing data:** a unit with more than 1% of its distances at the cap.
+- **When to decide:** before the island-wide results are examined (M5). The
+  between-flight test at pair borders (§4.1) reports here too, as `borders.csv`.
 
 ## 5. Slurm layout
 
-Six stages, each a job array chained with `--dependency=afterok`. Each array task is
-restartable through a done marker: a complete cache manifest or a finished output.
+Each stage is a job array (or a single job), chained with `--dependency=afterok`. Each
+task is restartable through a done marker: a complete cache manifest or a finished
+output. The files that run them are described in §5.1.
 
 | Stage | Array over | Resources per task (estimate, set by M3) | Wall time |
 |---|---|---|---|
 | 0. Plan units | – (one job) | 4 cores, 16 GB | < 1 h |
 | 1. Retile | 3,067 LAS files | 1 core, 4 GB | minutes each |
-| 2. Step 1 | ~1,000–1,500 units | 8 cores, 16 GB | minutes each |
-| 3. Step 2 per unit | units | 2 cores, 8 GB | minutes |
-| 4. Join + exports | one job per threshold | 8 cores, 64 GB | < 2 h |
+| 1b. DTM mosaics | 114 2017 campaigns | 1 core, 8 GB | minutes each |
+| 2. Step 1 | 764 packed jobs (2,440 units) | 8 cores, 16 GB | minutes each |
+| 3a. Unit voxels (2a) | 764 step-1 jobs | 2 cores, 8 GB | minutes |
+| 3b. Tile labels (2b) | 1,821 tiles | 1–2 cores, 4 GB | seconds–minutes |
+| 4. Join + exports (2c) | one job per threshold (4) | 8 cores, 64 GB | < 2 h |
+| 4b. Point labels (2d) | 764 step-1 jobs | 2 cores, 8 GB | minutes |
 | 5. Post-processing | blocks | 4 cores, 16 GB | < 1 h |
 
 - **Nodes** (`sinfo`, 2026-11-03): partition `R128C40` (default) has 8 nodes with 40 CPUs
@@ -232,9 +487,6 @@ restartable through a done marker: a complete cache manifest or a finished outpu
   `MaxSubmit` limits. Every stage fits in one array (the largest is the 3,067-file
   retile). Use `--array=1-N%M` anyway to stay a good neighbour on a shared cluster:
   start with `%20` for step 1 and raise it if the queue is empty.
-- **Logs:** one log per task, named by unit ID.
-- **Status:** a `status.csv` built from the done markers shows what's left. Resubmitting
-  a stage only runs unfinished tasks.
 - **Benchmark:** `sacct` per stage gives time and memory per unit, which updates the table.
   - **Untiled EV1** (job 792239, 2026-11-03): 926 ha, 16 CPUs, steps 1 and 2 in one job.
     It took 42 min and peaked at 42.8 GB. That is about 0.73 CPU-minutes and 46 MB per
@@ -246,10 +498,77 @@ restartable through a done marker: a complete cache manifest or a finished outpu
   - **Caveats:** these figures are an upper bound for step 1. The run read whole EV1
     files beyond the overlap, and they include step 2. The `EV1` backfill of the lowest
     2018 returns (job 792463) took 8.5 min and 3.4 GB.
-- **Reuse:** every task loads the GCC module, sets `LD_LIBRARY_PATH` and uses headless Qt,
-  as in `run_canopy.sbatch`.
 - **Scheduler:** plain Slurm arrays with dependencies are enough. Snakemake would add file
   tracking but isn't needed at this size.
+
+### 5.1 Workflow files
+
+*Design detailed 2026-11-16.*
+
+```
+workflow/
+  config.sh        paths (PR_GAPS_DATA, PR_GAPS_GLIHT, PR_GAPS_PLAN), the run's thresholds,
+                   and per-stage CPUs, memory, --time and concurrency (%M)
+  env.sh           sourced by every stage: gcc/15.2.0, LD_LIBRARY_PATH, headless Qt,
+                   the code-version check (§5.2)
+  stage.sbatch     one generic array script: `stage.sbatch <stage>` runs task N from
+                   tasks/<stage>.txt through the stage's command
+  submit.sh        `submit.sh <stage>...` or `submit.sh all`: writes the pending task
+                   lists and submits the arrays, chained with --dependency=afterok
+python/status.py   reads the done markers of every stage → status.csv and a summary
+```
+
+- **Tasks are named, not numbered.** Before submitting, `status.py --pending <stage>`
+  writes `tasks/<stage>.txt`: one unfinished task key per line (a LAS file, campaign,
+  job number, tile or threshold). Array index N runs line N. A resubmit therefore covers
+  only what's missing, and its indices never point at finished work.
+- **Commands per stage:**
+
+  | Stage | Task key | Command |
+  |---|---|---|
+  | `plan` | – | `plan_units.py` (run once by hand; a new plan needs `--force`) |
+  | `retile` | LAS file | `retile.py <file>` |
+  | `dtm` | 2017 campaign | `Rscript scripts/07_campaign_dtm.R <campaign>` |
+  | `step1` | job number | `canopy.py --job N` |
+  | `voxels` | job number | `island_gaps.py voxels --job N` |
+  | `label` | tile | `island_gaps.py label --tile T` |
+  | `join` | threshold | `island_gaps.py join --threshold T` |
+  | `points` | job number | `island_gaps.py points --job N` |
+  | `qc` | – | `island_qc.py` (§4.7) |
+
+- **Chaining:** `retile` and `dtm` run side by side. Then `step1` → `voxels` → `label` →
+  `join` → `points` → `qc`, each with `afterok` on the previous array. If any task fails,
+  the next stage doesn't start. Fix the failure and run `submit.sh` again, and it resumes
+  from the first unfinished stage.
+- **Concurrency to start with:** `retile` %40 (I/O-bound), `dtm` %20, `step1` %20,
+  `voxels` and `points` %40, `label` %80, `join` 4. Everything runs on the default
+  `R128C40` partition. `join` moves to `R256C128` only if M3 shows it needs more than
+  ~120 GB.
+- **Time limits:** the partitions have none, so every stage sets `--time` at ~3× its
+  expected task time (e.g. 4 h for `step1`). A hung task then fails visibly instead of
+  holding a slot for days.
+- **Retries:** none automatic. A failed task shows in `status.csv` with its log path,
+  and the next `submit.sh` reruns it. A task that has failed twice is listed separately,
+  so it gets investigated rather than resubmitted again.
+- **Logs:** `logs/<stage>/<task-key>.<jobid>_<index>.out`, one per task, under the run
+  directory.
+- **`status.csv`:** one row per stage and task, with the state (done, failed, pending,
+  running from `squeue`), the code version that produced it, its wall time and peak
+  memory from `sacct`, and the log path. The same numbers feed the benchmarks in this
+  section.
+
+### 5.2 Code on the cluster
+
+- **The cluster's `pr-gaps/` folder is a clone of the GitHub repo**
+  (`cameronjreimer/pr-gaps`), as is the local one (confirmed 2026-11-16). Code reaches
+  the cluster by committing and pushing here, then `git pull` there.
+- **Version check:** `env.sh` refuses to start a stage if `python/`, `scripts/` or
+  `workflow/` have uncommitted changes, and records `git rev-parse HEAD`.
+- **Provenance:** that commit is written into every cache manifest, done marker and run
+  ID. `status.py` flags any stage whose tasks were produced by more than one commit, so a
+  mid-stage code change is caught before the outputs are combined.
+- **The `.venv`** stays outside git, built by `init_env.sh` as now. `check_env.py` runs
+  at the start of each stage.
 
 ## 6. Storage
 
@@ -286,12 +605,23 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | Piece | Where | Notes |
 |---|---|---|
 | Work-unit planner | `python/plan_units.py` | **Done.** Footprints and pairs from `derived/inventory/` (§4.1) |
-| Retiler | `python/retile.py` | One LAS file per task |
-| Per-unit mode for `canopy.py` | `canopy.py` (`--unit`) | Reuses `prepare` / `analyze_threshold`; half-open clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
-| Per-unit voxel export, cross-tile join, global attributes | `python/join_gaps.py` | Union-find over tile-edge voxels |
-| Area accounting | `python/area.py` or R | Coverage cells ∩ forest mask per forest type |
-| Slurm stage scripts + status | `workflow/` (plan Appendix A.1) | One `.sbatch` per stage, plus a submit script |
-| QC report | extends `check_run.py` | Island-wide checks and per-tile maps |
+| Retiler | `python/retile.py` | One LAS file per task (§4.2) |
+| DTM mosaics | `scripts/07_campaign_dtm.R` | One 2017 campaign per task (§4.3); run `check_download.py --products dtm` first |
+| Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) | §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
+| Step 2: unit voxels, tile labels, join, point labels | `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
+| Area accounting | `python/area.py` | §4.6. Coverage columns × pair × forest type × mask |
+| Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | §5.1–5.2. Named task lists; the code-version check |
+| QC report | `python/island_qc.py` | §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |
+| DTM check | `check_download.py --products dtm` | §4.3. Small extension |
+
+**Build order:**
+1. `check_download.py --products dtm`;
+2. `retile.py` and `07_campaign_dtm.R`;
+3. `canopy.py --job` → **M2 step-1 test on EV1**;
+4. `island_gaps.py` → **M2 step-2 test on EV1**;
+5. `workflow/` and `status.py`. These can be written alongside 2–4, and the EV1 tests
+   are their first real runs;
+6. `area.py` and `island_qc.py`, before M4.
 
 ## 9. Afterwards: the recovery interval
 
@@ -308,6 +638,23 @@ Known (2026-11-03):
   passes.
 - The scratch purge policy is unknown, so nothing irreplaceable goes there.
 
-1. **D3** is under review (§3).
-2. **Benchmarks:** the untiled EV1 figures are in §5. M3 replaces them with per-unit
+Planning is complete as of 2026-11-16: every stage has a design, in §4.1–4.7 and §5.
+
+Decisions still open. None blocks building M2.
+
+1. **D3, the pair ranking:** review the `pairs` layer in `work_units.gpkg`, and sign off
+   before M4.
+2. **Observability rule:** how far below a 2017 return counts as observed, and whether
+   it enters the gap definition. Decide before M3, so ADR 009's tests can include it.
+3. **ADR 009:**
+   - confirm the two 10% limits;
+   - choose the 25 ha windows per forest type, dry forest included, before looking at
+     their gaps;
+   - set up the same-epoch null (`PR_5March2017_EV1` vs `PR_15March2017_EV1`). All of
+     this happens in M3.
+4. **The between-flight test at pair borders** (§4.1): which strip to use and what
+   counts as a pass. Design it with M3.
+5. **Excluding flagged pairs or tiles** (§4.7): decided from the QC report, before M5
+   results are examined.
+6. **Benchmarks:** the untiled EV1 figures are in §5. M3 replaces them with per-unit
    measurements.
