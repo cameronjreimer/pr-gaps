@@ -199,9 +199,11 @@ def task_rows(stage, running):
             state = "done"
         elif last_job in running and "end" not in last:
             state = "running"
-        elif history:
-            state = "failed"
+        elif history and (last.get("exit", 0) != 0 or "end" not in last):
+            state = "failed"  # the last attempt failed or was killed
         else:
+            # Never tried, or tried successfully for outputs that no longer count (e.g. a
+            # step-2 run under another plan): due to run.
             state = "pending"
         rows.append({"stage": stage, "task": task, "state": state, "attempts": len(history),
                      "failures": failures, "commit": last.get("commit", ""),
