@@ -58,7 +58,7 @@ What EV1 (untiled, 711 M points read) showed:
 |---|---|---|---|
 | D1 | What 2018 information beyond the distances is needed (point-gaps-plan §2.2, §2.4)? | **Settled (2026-11-03).** 2018 canopy height, and observability above the 2018 canopy, come from the published 1 m 2018 CHM (compare each 2017 point's absolute z with CHM + 2018 DTM = DSM). **Observability under a surviving canopy**: step 1 now records the lowest 2018 return per 1 m column everywhere (`post_lowest_z.npy`; no measurable time, ~4 B/column, ~2–3 GB island-wide). The 26 m `height_pct` / density metrics are covariates (stature, penetration), too coarse for per-point observability | The observability rule itself (how far below counts, own column or neighbours) is a step-2 choice. If it enters the gap definition, ADR 009's tests must run with it, so decide before M3 |
 | D2 | Cap the C2C search at the buffer width B (e.g. 50 m), flagging capped distances? | **Settled (2026-11-03): cap at 50 m**, implemented (`MAX_SEARCH_M`). Points with no 2018 return within 50 m get exactly 50.0; `check_run.py` reports their share | Tested: below the cap, distances match uncapped to float32 rounding; on LFDP (max 14.9 m) the capped distances are byte-identical. A synthetic case with points ~850 m from data ran in 0.15 s capped vs 11.4 s uncapped. Uncapped caches (LFDP, EV1) are still accepted for capped runs |
-| D3 | Pair priority for overlapping flights (§4.1) | Same block name first, then larger pair overlap, then closer flight altitude. **Under review** | Decides which 2017 flight represents each location. The partition itself is cheap to recompute (vector work, minutes). Changing it after M4 means re-running step 1 for every unit whose pair changes; retiled buckets are per campaign and unaffected. Settle before M4 |
+| D3 | Pair priority for overlapping flights (§4.1) | **Settled (2026-11-17): the default ranking** `-same_block,-overlap_ha,days_between` (same block name first, then larger pair overlap, then fewer days between flights), approved after review of the plan's `pairs` map. Flight altitude isn't in the inventory, so it isn't used | Decides which 2017 flight represents each location. The partition itself is cheap to recompute (vector work, minutes). Changing it after M4 means re-running step 1 for every unit whose pair changes; retiled buckets are per campaign and unaffected. Settle before M4 |
 | D4 | Keep `source_c2c.bin` (CloudCompare file)? | **Settled (2026-11-03): dropped** (`SAVE_CC_BIN = False`) | A CloudCompare-format copy of the 2017 cloud with its distances, for viewing in the CloudCompare GUI. It duplicates `xyz.npy` + `c2c.npy`; nothing reads it. ~20 B/point (LFDP cache 642 → 461 MB), ~0.3 TB island-wide |
 | D5 | Point labels for sensitivity runs | **Settled (2026-11-03): keep the distance caches, and point labels for every threshold run** | Storage is not limiting. The caches (per-point distances) are what allow any threshold to be computed later; labels are per-threshold outputs (4 B/point, ~54 GB each), recomputable from the caches in minutes per unit |
 | D6 | ADR 009 tests (null, 25 ha windows) | Run during §7 milestones M1–M3 | Step 2's primary threshold is chosen by them; step 1 doesn't depend on them |
@@ -689,9 +689,9 @@ sensitivity set.
 
 | # | Milestone | Gate before moving on |
 |---|---|---|
-| M0 | D3 reviewed. Done 2026-11-03: array limits and nodes read (§5); all 3,067 LAS files present (`check_download.py`). D1, D2, D4, D5 and storage are settled | – |
+| M0 | Done. D3 settled 2026-11-17. Done 2026-11-03: array limits and nodes read (§5); all 3,067 LAS files present (`check_download.py`). D1, D2, D4, D5 and storage are settled | – |
 | M1 | Work-unit plan (§4.1) built and mapped | Units cover 58,801 ha exactly once; no 2017 location in two units |
-| M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run's gaps (same thresholds, same connectivity) up to float32 rounding (`check_run.py --compare` logic) |
+| M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run. **Passed 2026-11-17** on the cluster: `check_tiling.py ev1` (step 1: identical distances, every point in exactly one unit) and `check_tiling.py ev1 --gaps e2adac6119af3dc7 --island dd6164997a92c379` (step 2 at 2 m and 5 m: every gap away from the study-area edge is the same set of points) |
 | M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted |
 | M4 | Full step 1 (all units) | Every unit complete; QC maps (ground C2C per tile) show no registration blocks |
 | M5 | Step 2 + join: primary threshold, then the ADR 009 sensitivity set | `check_run`-style consistency; largest gap per tile within the separation test |
@@ -741,8 +741,7 @@ Planning is complete as of 2026-11-16: every stage has a design, in §4.1–4.7 
 
 Decisions still open. None blocks building M2.
 
-1. **D3, the pair ranking:** review the `pairs` layer in `work_units.gpkg`, and sign off
-   before M4.
+1. **D3, the pair ranking:** settled 2026-11-17 (the default ranking; §3).
 2. **Observability rule:** how far below a 2017 return counts as observed, and whether
    it enters the gap definition. Decide before M3, so ADR 009's tests can include it.
 3. **ADR 009:**

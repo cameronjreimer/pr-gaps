@@ -45,6 +45,7 @@ case "$STAGE" in
     retile) "$PYTHON" -u python/retile.py "$TASK" ;;
     dtm)    "$PYTHON" -u python/campaign_dtm.py ;;
     step1)  "$PYTHON" -u python/canopy.py --job "$TASK" ;;
+    area)   "$PYTHON" -u python/area.py ;;
     voxels) "$PYTHON" -u python/island_gaps.py voxels --job "$TASK" ;;
     label)  "$PYTHON" -u python/island_gaps.py label --tile "$TASK" ;;
     join)   "$PYTHON" -u python/island_gaps.py join --threshold "$TASK" ;;

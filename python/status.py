@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from canopy import DATA, GLIHT  # noqa: E402
 
 WORKFLOW = Path(os.environ.get("PR_GAPS_WORKFLOW") or DATA / "workflow")
-ORDER = ["retile", "dtm", "step1", "voxels", "label", "join", "points", "qc"]
+ORDER = ["retile", "dtm", "step1", "area", "voxels", "label", "join", "points", "qc"]
 
 
 # ------------------------------------------------------------- stage definitions
@@ -84,6 +84,24 @@ def step1_done(task):
     return units.job_done(task, plan_units())
 
 
+def area_done(task):
+    """An area run for this plan that left no unit out."""
+    import hashlib
+
+    plan_hash = hashlib.sha256((PLAN_DIR() / "plan.json").read_bytes()).hexdigest()
+    for marker in (DATA / "runs" / "canopy" / "area").glob("*/area.json"):
+        record = json.loads(marker.read_text(encoding="utf-8"))
+        if record.get("plan_sha256") == plan_hash and not record.get("units_without_cache"):
+            return True
+    return False
+
+
+def PLAN_DIR():  # noqa: N802
+    from canopy import PLAN
+
+    return PLAN
+
+
 def island():
     import island_gaps
 
@@ -129,6 +147,7 @@ STAGES = {
     "retile": (retile_tasks, retile_done),
     "dtm": (lambda: ["all"], dtm_done),
     "step1": (step1_tasks, step1_done),
+    "area": (lambda: ["all"], area_done),
     "voxels": (step1_tasks, voxels_done),
     "label": (label_tasks, label_done),
     "join": (join_tasks, join_done),
