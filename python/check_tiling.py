@@ -225,8 +225,8 @@ def compare_gaps(args, threshold, site_manifest, site, site_keys, keys, site_at,
             exact += 1
         elif s not in site_affected:
             bad.append(int(s))
-    island_unmatched = [int(i) for i in per_island.index if i > 0 and i not in island_affected
-                        and (pairs[pairs.i == i].s == 0).any()]
+    with_unlabelled = set(pairs.loc[pairs.s == 0, "i"].unique().tolist())
+    island_unmatched = [int(i) for i in with_unlabelled if i > 0 and i not in island_affected]
     n_site = int((site_size[1:] > 0).sum())
     report("FAIL" if bad else "PASS",
            f"{n_site:,} site gaps: {exact:,} reproduced exactly, {len(site_affected):,} touch the "
