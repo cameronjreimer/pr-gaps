@@ -3,6 +3,7 @@
     python python/check_run.py                 # the site canopy.py would run (PR_GAPS_SITE)
     python python/check_run.py ev1
     python python/check_run.py ev1 --compare lfdp
+    python python/check_run.py units/E0202_N2028_p030 --compare ev1   # an island-wide unit
 
 Reads $PR_GAPS_DATA/runs/canopy/<site>/ and prints PASS/WARN/FAIL lines:
 
@@ -204,7 +205,9 @@ def main():
     root = canopy.DATA / "runs" / "canopy" / args.site
     print(f"site {args.site}: {root}")
     cached = check_cache(root)
-    if cached is not None:
+    if cached is not None and args.site.startswith("units/"):
+        print("step 2: none per unit (island-wide gaps come from island_gaps.py)")
+    elif cached is not None:
         check_gaps(root, cached[0]["point_count"])
         if args.compare:
             compare(args.site, cached, args.compare)

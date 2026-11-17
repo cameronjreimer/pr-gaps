@@ -62,9 +62,32 @@ def dtm_done(task):
     return all(c in index.index and Path(index.at[c, "path"]).is_file() for c in needed)
 
 
+_UNITS = None
+
+
+def plan_units():
+    global _UNITS
+    if _UNITS is None:
+        import units
+
+        _UNITS = units.load_units()
+    return _UNITS
+
+
+def step1_tasks():
+    return [str(job) for job in sorted(plan_units().job.unique())]
+
+
+def step1_done(task):
+    import units
+
+    return units.job_done(task, plan_units())
+
+
 STAGES = {
     "retile": (retile_tasks, retile_done),
     "dtm": (lambda: ["all"], dtm_done),
+    "step1": (step1_tasks, step1_done),
 }
 
 

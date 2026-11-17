@@ -256,6 +256,26 @@ cluster needs one environment, and its NaN handling is explicit.
 
 *Design detailed 2026-11-16.*
 
+**Built (2026-11-17).** `python/units.py`, run as `canopy.py --job N` or `--unit ID`.
+`canopy.py`'s `stream_epoch` gained two things: a domain given as a function (the
+owned-column test) and a `keep` box for the reference. It also reads `source_file` /
+`source_index` from bucket points.
+
+The retiled parts carry no CRS record, so units use EPSG:32620 explicitly, the plan's
+CRS.
+
+Tested locally on the LFDP unit (`E0202_N2028_p030`, 95.3 ha, job 515):
+- **Results:** 31.5 M 2017 points, 99.9% covered, no distance at the cap, ground HAG
+  median +0.04 m.
+- **Comparison:** `check_run.py units/E0202_N2028_p030 --compare lfdp` matched all
+  9,036,855 LFDP points, with identical distances (max |difference| 0.000 m). That's the
+  step-1 tiling test at LFDP scale.
+- **Rerun:** reuses the cache in seconds.
+- **Time:** 14.7 min on 8 threads for 31.5 M points. Scaled to ~17 billion 2017 points,
+  that's ~1,000 CPU-hours, or ~6–7 h at 20 jobs of 8 CPUs. That's longer than §5's
+  estimate from the untiled run, because each unit reads a 50 m ring of 2018 points from
+  neighbouring tiles. The M3 pilot measures it on the cluster.
+
 **What it does.** It extends the current single-site run: same distance code, same cache
 format and provenance. Only the inputs change, from site lists to plan units.
 
@@ -661,7 +681,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | Work-unit planner | `python/plan_units.py` | **Done.** Footprints and pairs from `derived/inventory/` (§4.1) |
 | Retiler | `python/retile.py` | **Built.** One LAS file per task (§4.2) |
 | DTM mosaics | `python/campaign_dtm.py` | **Built.** §4.3; one job (114 small rasters) |
-| Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) | §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
+| Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) → `python/units.py` | **Built.** §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
 | Step 2: unit voxels, tile labels, join, point labels | `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
 | Area accounting | `python/area.py` | §4.6. Coverage columns × pair × forest type × mask |
 | Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | **Built** for `retile` and `dtm` (§5.1). A stage is added by giving it a command in `stage.sbatch` and a task list and done test in `status.py` |
@@ -671,7 +691,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 **Build order:**
 1. `check_download.py --products dtm` (built);
 2. `retile.py` and `campaign_dtm.py` (built);
-3. `canopy.py --job` → **M2 step-1 test on EV1**;
+3. `canopy.py --job` (built; LFDP comparison passed) → **M2 step-1 test on EV1** (on the cluster);
 4. `island_gaps.py` → **M2 step-2 test on EV1**;
 5. `workflow/` and `status.py` (built). Each new stage is added to them as it is built;
 6. `area.py` and `island_qc.py`, before M4.

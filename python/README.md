@@ -257,6 +257,7 @@ are missing, much smaller than listed, or left as `.part`. `--products dtm` chec
 | `plan_units.py` | Gives each 1 m column to one 2017 → 2018 pair, cuts the result into 1 km work units, and packs them into array jobs | `$PR_GAPS_PLAN` (default `interim/work_units/`) |
 | `retile.py <campaign>/<file>` | Cuts one LAS file into 1 km buckets, with `source_file` / `source_index` per point; `--list-tasks`, `--check [--deep]` | `$PR_GAPS_RETILED` (default `interim/retiled/`) |
 | `campaign_dtm.py` | One DTM per 2017 campaign: the downloaded raster, or its strips merged (never a published mosaic beside strips) | `interim/dtm/` and `index.csv` |
+| `canopy.py --job N` / `--unit ID` (`units.py`) | Step 1 (distances) for work units, from the buckets, the ownership rasters and the campaign DTMs; check one with `check_run.py units/<unit>` | `runs/canopy/units/<unit>/cache/` |
 
 ### Running the island-wide stages on the cluster (hpc-scaling-plan.md §5.1)
 

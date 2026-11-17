@@ -679,8 +679,12 @@ def load_domain(path, crs):
 
 
 def in_domain(xyz, polygon):
+    """polygon: a shapely study area, None (everything), or a function xyz -> mask
+    (an island-wide unit's owned columns; units.py)."""
     if polygon is None:
         return np.ones(len(xyz), dtype=bool)
+    if callable(polygon):
+        return polygon(xyz)
     import shapely
 
     # intersects includes boundary points and excludes hole interiors.
@@ -770,7 +774,12 @@ def stream_epoch(
     chunk_size,
     transform=None,
     provenance=False,
+    keep=None,
 ):
+    """keep (post only): a function xyz -> mask limiting the reference written, e.g. a
+    unit's bounds plus the search cap. Points from retiled buckets (retile.py) carry
+    their original source_file / source_index, which are used instead of this call's
+    file numbers and record offsets."""
     import laspy
 
     total = 0
@@ -818,16 +827,26 @@ def stream_epoch(
                     if provenance:
                         selected = np.flatnonzero(mask)
                         xyz = xyz[mask]
-                        np.full(len(selected), file_number, dtype=np.uint32).tofile(
-                            mapping["source_file"]
-                        )
-                        (selected.astype(np.uint64) + offset).tofile(
-                            mapping["source_index"]
-                        )
+                        if "source_index" in points.point_format.dimension_names:
+                            np.asarray(points.source_file)[mask].astype(np.uint32).tofile(
+                                mapping["source_file"]
+                            )
+                            np.asarray(points.source_index)[mask].astype(np.uint64).tofile(
+                                mapping["source_index"]
+                            )
+                        else:
+                            np.full(len(selected), file_number, dtype=np.uint32).tofile(
+                                mapping["source_file"]
+                            )
+                            (selected.astype(np.uint64) + offset).tofile(
+                                mapping["source_index"]
+                            )
                         np.asarray(points.classification, dtype=np.uint8)[mask].tofile(
                             mapping["classification"]
                         )
                     # Reference retains every selected tile point, outside-domain neighbors included.
+                    if keep is not None and not provenance:
+                        xyz = xyz[keep(xyz)]
                     xyz.tofile(output)
                     if len(xyz):
                         minimum = np.minimum(minimum, xyz.min(axis=0))
@@ -2111,7 +2130,20 @@ def gap_settings(**overrides):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Point-cloud gaps for the SITE set above, or step 1 for island-wide "
+                    "work units (units.py, hpc-scaling-plan.md §4.4).")
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument("--job", type=int, help="step 1 for every unit of this array job")
+    which.add_argument("--unit", help="step 1 for one unit, e.g. E0199_N2029_p030")
+    args = parser.parse_args()
     os.chdir(Path(__file__).resolve().parent)
+    if args.job is not None or args.unit:
+        import units
+
+        sys.exit(units.run(job=args.job, unit_id=args.unit))
     prepare_site()
     stamp(f"gaps at thresholds: {THRESHOLDS}")
     run = analyze_cache(CACHE, OUTPUT, **gap_settings())

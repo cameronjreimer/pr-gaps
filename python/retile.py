@@ -70,10 +70,18 @@ def campaign_files(campaign, las=None):
 def write_files_csv(campaign, names):
     """Identical content from every task, so concurrent writers can't disagree."""
     path = RETILED / campaign / "files.csv"
+    table = pd.DataFrame({"source_file": range(len(names)), "name": names})
+    if path.is_file() and pd.read_csv(path).equals(table):
+        return  # already written by another task (Windows can't replace a file in use)
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(f"files.csv.{os.getpid()}.part")
-    pd.DataFrame({"source_file": range(len(names)), "name": names}).to_csv(partial, index=False)
-    partial.replace(path)
+    table.to_csv(partial, index=False)
+    try:
+        partial.replace(path)
+    except PermissionError:
+        partial.unlink(missing_ok=True)
+        if not (path.is_file() and pd.read_csv(path).equals(table)):
+            raise
 
 
 def resolve(task):
