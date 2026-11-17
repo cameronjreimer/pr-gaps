@@ -261,7 +261,13 @@ def atomic_directory(destination):
         os.rename(temporary, destination)
     finally:
         if temporary.exists():
-            shutil.rmtree(temporary)
+            # On network file systems, files a failed step still holds open (memory
+            # maps referenced by the traceback) can't be removed yet. Leave the folder
+            # rather than replace the step's real error with this one; check_run.py
+            # reports leftovers, and the next run starts a fresh folder.
+            shutil.rmtree(temporary, ignore_errors=True)
+            if temporary.exists():
+                warnings.warn(f"Could not fully remove {temporary}; delete it later", RuntimeWarning)
 
 
 @contextmanager

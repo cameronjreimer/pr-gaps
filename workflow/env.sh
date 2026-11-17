@@ -5,7 +5,28 @@
 # PR_GAPS_NO_MODULES=1 skips this where there is no module system (local tests).
 if [[ -z "${PR_GAPS_NO_MODULES:-}" ]]; then
     module load gcc/15.2.0
-    export LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so.6)"):${LD_LIBRARY_PATH:-}"
+    if (( $(gcc -dumpversion | cut -d. -f1) < 13 )); then
+        echo "gcc/15.2.0 did not load (gcc is $(gcc -dumpversion)); CloudComPy needs GCC >= 13.2's runtime" >&2
+        exit 1
+    fi
+    # GCC 15's runtime first, and no system library folder ahead of CloudComPy's own
+    # libraries. An inherited /usr/lib64 (e.g. gcc 11's .../11/../../../../lib64, from a
+    # shell that set LD_LIBRARY_PATH before loading gcc/15.2.0) makes its GDAL load the
+    # system libjson-c: "version `JSONC_PRIVATE' not found".
+    keep=()
+    IFS=: read -ra inherited <<< "${LD_LIBRARY_PATH:-}"
+    for folder in "${inherited[@]}"; do
+        [[ -z "$folder" ]] && continue
+        case "$(realpath -m "$folder" 2>/dev/null || echo "$folder")" in
+            /usr/lib64|/lib64|/usr/lib|/lib) continue ;;
+        esac
+        keep+=("$folder")
+    done
+    LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so.6)")"
+    if (( ${#keep[@]} )); then
+        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(IFS=:; echo "${keep[*]}")"
+    fi
+    export LD_LIBRARY_PATH
 fi
 export QT_QPA_PLATFORM=offscreen     # no display in a batch job
 
