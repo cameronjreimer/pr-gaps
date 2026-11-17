@@ -338,6 +338,25 @@ format and provenance. Only the inputs change, from site lists to plan units.
 
 *Design detailed 2026-11-16.*
 
+**Built (2026-11-17).** `python/island_gaps.py` (`voxels`, `label`, `join`, `points`,
+`run`), registered in `status.py`, and `python/subset_plan.py` for test plans.
+
+Tested locally on two neighbouring EV1 units (`E0202_N2028_p030`, `E0203_N2028_p030`),
+against `canopy.analyze_threshold` run on both units' points as one cloud:
+- **Gaps:** the same 11,615 gaps at 2 m (36 of them span both tiles) and 3,264 at 5 m
+  (4 span both), with the same IDs.
+- **Attributes:** identical to about 10⁻¹⁰ m (float summation order). The footprint
+  polygons' areas equal `footprint_area_m2`.
+- **Point labels:** every one identical.
+- **Bug found and fixed:** two labels of one tile can share columns and still join
+  through another tile. The join now counts multi-tile gaps' columns from a per-label
+  column list (`columns.parquet`), instead of summing per-label counts.
+- **Against LFDP's own run:** `check_tiling.py lfdp --gaps c2599daebbaa973e --island …`
+  reproduced 2,035 of 2,131 gaps at 2 m and 469 of 491 at 5 m point for point. Every
+  other gap touches the study-area edge; none differ away from it.
+- **Speed:** `label` took ~1–2.5 min per tile for two thresholds, so roughly 4–5 min per
+  tile for four.
+
 **Decisions (2026-11-16):**
 - **Pair borders:** a gap crossing one stays one gap. It records its pairs and a
   `crosses_pair_border` flag.
@@ -689,7 +708,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | Retiler | `python/retile.py` | **Built.** One LAS file per task (§4.2) |
 | DTM mosaics | `python/campaign_dtm.py` | **Built.** §4.3; one job (114 small rasters) |
 | Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) → `python/units.py` | **Built.** §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
-| Step 2: unit voxels, tile labels, join, point labels | `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
+| Step 2: unit voxels, tile labels, join, point labels | **Built.** `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
 | Area accounting | `python/area.py` | §4.6. Coverage columns × pair × forest type × mask |
 | Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | **Built** for `retile` and `dtm` (§5.1). A stage is added by giving it a command in `stage.sbatch` and a task list and done test in `status.py` |
 | QC report | `python/island_qc.py` | §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |

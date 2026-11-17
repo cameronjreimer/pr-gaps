@@ -84,10 +84,55 @@ def step1_done(task):
     return units.job_done(task, plan_units())
 
 
+def island():
+    import island_gaps
+
+    return island_gaps, island_gaps.run_dir()
+
+
+def job_units(task):
+    plan = plan_units()
+    return [pd.Series(row._asdict()) for row in plan[plan.job == int(task)].itertuples(index=False)]
+
+
+def voxels_done(task):
+    gaps, root = island()
+    return all(gaps.unit_voxels_done(root, unit) for unit in job_units(task))
+
+
+def label_tasks():
+    return sorted(plan_units().tile.unique())
+
+
+def label_done(task):
+    gaps, root = island()
+    return gaps.label_done(root, task, plan_units())
+
+
+def join_tasks():
+    import island_gaps
+
+    return [f"{t:g}" for t in island_gaps.SETTINGS["thresholds"]]
+
+
+def join_done(task):
+    gaps, root = island()
+    return (root / "gaps" / gaps.label(float(task)) / "join.json").is_file()
+
+
+def points_done(task):
+    gaps, root = island()
+    return all(gaps.unit_points_done(root, unit) for unit in job_units(task))
+
+
 STAGES = {
     "retile": (retile_tasks, retile_done),
     "dtm": (lambda: ["all"], dtm_done),
     "step1": (step1_tasks, step1_done),
+    "voxels": (step1_tasks, voxels_done),
+    "label": (label_tasks, label_done),
+    "join": (join_tasks, join_done),
+    "points": (step1_tasks, points_done),
 }
 
 

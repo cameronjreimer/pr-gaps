@@ -32,6 +32,7 @@ mkdir -p "$(dirname "$LOG")" "$(dirname "$ATTEMPTS")"
 exec > "$LOG" 2>&1
 
 COMMIT="$(code_version)"
+export PR_GAPS_CODE_VERSION="$COMMIT"   # recorded in the scripts' done markers
 record() {  # one JSON line per event; values never contain quotes
     printf '{"event": "%s", "job": "%s", "time": "%s", "commit": "%s", "log": "%s"%s}\n' \
         "$1" "$JOB" "$(date -u +%FT%TZ)" "$COMMIT" "$LOG" "${2:-}" >> "$ATTEMPTS"

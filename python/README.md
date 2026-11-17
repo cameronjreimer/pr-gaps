@@ -257,6 +257,9 @@ are missing, much smaller than listed, or left as `.part`. `--products dtm` chec
 | `plan_units.py` | Gives each 1 m column to one 2017 → 2018 pair, cuts the result into 1 km work units, and packs them into array jobs | `$PR_GAPS_PLAN` (default `interim/work_units/`) |
 | `retile.py <campaign>/<file>` | Cuts one LAS file into 1 km buckets, with `source_file` / `source_index` per point; `--list-tasks`, `--check [--deep]` | `$PR_GAPS_RETILED` (default `interim/retiled/`) |
 | `campaign_dtm.py` | One DTM per 2017 campaign: the downloaded raster, or its strips merged (never a published mosaic beside strips) | `interim/dtm/` and `index.csv` |
+| `island_gaps.py voxels` / `label` / `join` / `points` | Step 2 island-wide: changed voxels per unit, gaps per tile, joined across tile edges, then per-point gap IDs (`run` prints the run folder) | `runs/canopy/island/<run id>/` |
+| `subset_plan.py --pairs R` / `--units U…` | A plan holding only some units, for testing on part of the island (`PR_GAPS_PLAN=<dir>`) | the folder given |
+| `check_tiling.py <site> [--gaps RUN --island DIR]` | M2 test: units (and island gaps) against an untiled site run | prints PASS/FAIL |
 | `canopy.py --job N` / `--unit ID` (`units.py`) | Step 1 (distances) for work units, from the buckets, the ownership rasters and the campaign DTMs; check one with `check_run.py units/<unit>` | `runs/canopy/units/<unit>/cache/` |
 
 ### Running the island-wide stages on the cluster (hpc-scaling-plan.md §5.1)

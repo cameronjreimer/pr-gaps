@@ -2,6 +2,7 @@
 
     python python/check_tiling.py ev1           # the site's pair's units vs the site cache
     python python/check_tiling.py ev1 --units E0202_N2028_p030 E0203_N2028_p030
+    python python/check_tiling.py ev1 --gaps RUN_ID --island DIR   # ...and step 2's gaps
 
 docs/hpc-scaling-plan.md §4.4. Matches 2017 points between the site cache and the unit
 caches by original LAS file and record (source_file / source_index), then checks:
@@ -13,6 +14,12 @@ caches by original LAS file and record (source_file / source_index), then checks
   centre, so those columns legitimately differ;
 - distances agree to float32 rounding (1 mm). Unit distances are capped at 50 m and the
   site's may not be, so the site distance is capped the same way before comparing.
+
+With --gaps, step 2 too: the site's gap run (point_labels.npy per threshold) against
+an island_gaps run (labels_<T>m.npy per unit). Every site gap away from the study-area
+edge must be the same set of points as one island gap, and no island gap away from the
+edge may hold points no site gap holds. Gaps with a point on one side only, or in a
+boundary column, are counted as touching the edge.
 
 Default units: every plan unit of the pair the site ran (its 2017 and 2018 campaigns).
 Run it as a job: it holds both clouds' keys in memory (~40 bytes per point).
@@ -82,7 +89,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("site", help="the untiled site run, e.g. ev1")
     parser.add_argument("--units", nargs="*", help="unit IDs (default: every unit of the site's pair)")
+    parser.add_argument("--gaps", metavar="RUN_ID",
+                        help="also compare gaps: the site's gap run (runs/canopy/<site>/gaps/<RUN_ID>)")
+    parser.add_argument("--island", help="with --gaps: the island_gaps run directory")
+    parser.add_argument("--thresholds", nargs="+", type=float, default=[2.0, 5.0])
     args = parser.parse_args()
+    if args.gaps and not args.island:
+        parser.error("--gaps needs --island (print it with: island_gaps.py run)")
 
     site_root = canopy.DATA / "runs" / "canopy" / args.site / "cache"
     site_manifest, site = canopy.load_cache(site_root)
@@ -150,8 +163,71 @@ def main():
            f"{len(unit_only):,} unit points not in the site: {int(edge.sum()):,} in boundary "
            f"columns, {int(inside.sum()):,} inside the study area (should be 0), the rest outside it")
 
+    if args.gaps:
+        unit_sizes = [n for _, n in unit_xyz_parts]
+        unit_names = [Path(root).parent.name for root, _ in unit_xyz_parts]
+        for threshold in args.thresholds:
+            compare_gaps(args, threshold, site_manifest, site, site_keys, keys, site_at, unit_at,
+                         site_only, unit_only, unit_names, unit_sizes, polygon)
+
     print("\n" + ("FAILED: " + "; ".join(failures) if failures else "All checks passed."))
     return 1 if failures else 0
+
+
+def compare_gaps(args, threshold, site_manifest, site, site_keys, keys, site_at, unit_at,
+                 site_only, unit_only, unit_names, unit_sizes, polygon):
+    """Step 2: is every gap away from the study-area edge the same set of points?"""
+    folder = canopy.threshold_directory_name(threshold)
+    site_labels = np.load(canopy.DATA / "runs" / "canopy" / args.site / "gaps" / args.gaps
+                          / folder / "point_labels.npy")
+    island = Path(args.island)
+    unit_labels = np.concatenate([np.load(island / "units" / u / f"labels_{threshold:g}m.npy")
+                                  for u in unit_names]) if unit_names else np.zeros(0, np.uint32)
+    print(f"gaps at {threshold:g} m: site run {args.gaps} vs island run {island.name}")
+    # Gaps touched by the study-area edge: holding a point on one side only, or a point
+    # in a column that touches the boundary.
+    site_xyz = np.asarray(site["xyz"])
+    labelled = np.flatnonzero(site_labels)
+    columns, inverse = np.unique(np.floor(site_xyz[labelled, :2]).astype(np.int64), axis=0,
+                                 return_inverse=True)
+    on_edge = boundary_columns(columns, polygon)[inverse.ravel()]
+    site_affected = set(np.unique(site_labels[labelled[on_edge]]).tolist())
+    site_affected |= set(np.unique(site_labels[site_only]).tolist())
+    island_affected = set(np.unique(unit_labels[unit_only]).tolist())
+    shared_site, shared_island = site_labels[site_at], unit_labels[unit_at]
+    island_affected |= set(np.unique(shared_island[np.isin(shared_site, list(site_affected))]).tolist())
+    site_affected |= set(np.unique(shared_site[np.isin(shared_island, list(island_affected))]).tolist())
+    site_affected.discard(0)
+    island_affected.discard(0)
+    # Exact: a site gap's points all carry one island gap, which holds those points and
+    # no others.
+    pairs = pd.DataFrame({"s": shared_site, "i": shared_island})
+    pairs = pairs[(pairs.s > 0) | (pairs.i > 0)]
+    per_site = pairs.groupby("s").i.agg(["nunique", "first"])
+    per_island = pairs.groupby("i").s.nunique()
+    site_size = np.bincount(site_labels)
+    island_size = np.bincount(unit_labels)
+    exact = 0
+    bad = []
+    for s, row in per_site.iterrows():
+        if s == 0:
+            continue
+        i = row["first"]
+        if (row["nunique"] == 1 and i > 0 and per_island.get(i, 0) == 1
+                and site_size[s] == island_size[i]):
+            exact += 1
+        elif s not in site_affected:
+            bad.append(int(s))
+    island_unmatched = [int(i) for i in per_island.index if i > 0 and i not in island_affected
+                        and (pairs[pairs.i == i].s == 0).any()]
+    n_site = int((site_size[1:] > 0).sum())
+    report("FAIL" if bad else "PASS",
+           f"{n_site:,} site gaps: {exact:,} reproduced exactly, {len(site_affected):,} touch the "
+           f"study-area edge, {len(bad):,} differ away from it (should be 0)"
+           + (f", e.g. {bad[:5]}" if bad else ""))
+    report("FAIL" if island_unmatched else "PASS",
+           f"{len(island_unmatched):,} island gaps away from the edge hold points no site gap "
+           "holds (should be 0)")
 
 
 if __name__ == "__main__":
