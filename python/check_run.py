@@ -209,8 +209,8 @@ def main():
         print("step 2: none per unit (island-wide gaps come from island_gaps.py)")
     elif cached is not None:
         check_gaps(root, cached[0]["point_count"])
-        if args.compare:
-            compare(args.site, cached, args.compare)
+    if cached is not None and args.compare:
+        compare(args.site, cached, args.compare)
     print("\n" + ("FAILED: " + "; ".join(failures) if failures else "All checks passed."))
     return 1 if failures else 0
 

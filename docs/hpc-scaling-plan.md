@@ -271,6 +271,13 @@ Tested locally on the LFDP unit (`E0202_N2028_p030`, 95.3 ha, job 515):
   9,036,855 LFDP points, with identical distances (max |difference| 0.000 m). That's the
   step-1 tiling test at LFDP scale.
 - **Rerun:** reuses the cache in seconds.
+- **The full M2 step-1 test** is `python/check_tiling.py <site>`. It matches every 2017
+  point of the site cache with the pair's unit caches, by original file and record.
+  - **Checks:** no point in two units; identical distances (site distances capped at
+    50 m, like the units'); and no point inside the study area present on one side
+    only. Points in columns touching the study-area boundary are reported separately.
+  - **Local result:** passed for LFDP (`--units E0202_N2028_p030`) in 45 s.
+  - **Cluster:** run it as `check_tiling.py ev1` for EV1's 19 units.
 - **Time:** 14.7 min on 8 threads for 31.5 M points. Scaled to ~17 billion 2017 points,
   that's ~1,000 CPU-hours, or ~6–7 h at 20 jobs of 8 CPUs. That's longer than §5's
   estimate from the untiled run, because each unit reads a 50 m ring of 2018 points from
