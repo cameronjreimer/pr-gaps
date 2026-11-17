@@ -91,7 +91,7 @@ def main():
     parser.add_argument("--units", nargs="*", help="unit IDs (default: every unit of the site's pair)")
     parser.add_argument("--gaps", metavar="RUN_ID",
                         help="also compare gaps: the site's gap run (runs/canopy/<site>/gaps/<RUN_ID>)")
-    parser.add_argument("--island", help="with --gaps: the island_gaps run directory")
+    parser.add_argument("--island", help="with --gaps: the island_gaps run directory or its run ID")
     parser.add_argument("--thresholds", nargs="+", type=float, default=[2.0, 5.0])
     args = parser.parse_args()
     if args.gaps and not args.island:
@@ -181,6 +181,13 @@ def compare_gaps(args, threshold, site_manifest, site, site_keys, keys, site_at,
     site_labels = np.load(canopy.DATA / "runs" / "canopy" / args.site / "gaps" / args.gaps
                           / folder / "point_labels.npy")
     island = Path(args.island)
+    if not island.is_dir():  # a bare run ID
+        island = canopy.DATA / "runs" / "canopy" / "island" / args.island
+    missing = [u for u in unit_names
+               if not (island / "units" / u / f"labels_{threshold:g}m.npy").is_file()]
+    if missing:
+        raise SystemExit(f"No {threshold:g} m point labels in {island} for {len(missing)} units, "
+                         f"e.g. {missing[0]}: run the points stage (island_gaps.py points) first")
     unit_labels = np.concatenate([np.load(island / "units" / u / f"labels_{threshold:g}m.npy")
                                   for u in unit_names]) if unit_names else np.zeros(0, np.uint32)
     print(f"gaps at {threshold:g} m: site run {args.gaps} vs island run {island.name}")
