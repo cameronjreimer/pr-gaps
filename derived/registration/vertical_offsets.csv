@@ -1,0 +1,2 @@
+campaign,epoch,dz_m,decided,reason
+PR_28April2018_FIA11,2018_post,41.82,2026-11-18,"Island QC (2026-11-18): lowest 2018 return minus 2017 ground return in the same 1 m column = -42.00 m (pair rank 5, PR_14March2017_FIA11), against -0.18 m for the registered EV1 pair; ground C2C median 26.77 m. Matches the ~42 m geoid separation in Puerto Rico: this campaign is almost certainly in ellipsoidal heights, the others orthometric. Constant shift = -(-42.00) + (-0.18). Verify after the rerun: rank 5's ground_dz should be near the other pairs' and its ground C2C near 0.2 m."

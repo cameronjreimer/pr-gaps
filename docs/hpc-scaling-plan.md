@@ -62,6 +62,7 @@ What EV1 (untiled, 711 M points read) showed:
 | D4 | Keep `source_c2c.bin` (CloudCompare file)? | **Settled (2026-11-03): dropped** (`SAVE_CC_BIN = False`) | A CloudCompare-format copy of the 2017 cloud with its distances, for viewing in the CloudCompare GUI. It duplicates `xyz.npy` + `c2c.npy`; nothing reads it. ~20 B/point (LFDP cache 642 → 461 MB), ~0.3 TB island-wide |
 | D5 | Point labels for sensitivity runs | **Settled (2026-11-03): keep the distance caches, and point labels for every threshold run** | Storage is not limiting. The caches (per-point distances) are what allow any threshold to be computed later; labels are per-threshold outputs (4 B/point, ~54 GB each), recomputable from the caches in minutes per unit |
 | D6 | ADR 009 tests (null, 25 ha windows) | Run during §7 milestones M1–M3 | Step 2's primary threshold is chosen by them; step 1 doesn't depend on them |
+| D7 | Flagged pairs from island QC (§4.7, 2026-11-18) | **Settled (2026-11-18).** Rank 5 (`PR_14March2017_FIA11 → PR_28April2018_FIA11`): the lowest 2018 return in each column sat 42.00 m below the 2017 ground (EV1: −0.18 m), matching Puerto Rico's ~42 m geoid separation, so 2018 FIA11 is almost certainly in ellipsoidal heights. It is corrected by a constant **+41.82 m**, recorded in `derived/registration/vertical_offsets.csv` and applied by `units.py` to that campaign's 2018 points; only the affected units rebuild. The 16 other flagged pairs (ground C2C median 0.5–1 m, or ground height off ±0.3 m) are **kept and flagged**. `main_pair_flags` / `main_pair_flagged` are carried into the gap table, and one flagged pair goes into ADR 009's noise test in M3; M3 decides whether any are corrected or excluded | Rank 5 would otherwise make nearly every point a change. The moderate pairs matter at 2 m more than at 3 m, which ADR 009's noise test measures |
 
 ## 4. Design
 
@@ -774,7 +775,8 @@ Decisions still open. None blocks building M2.
      this happens in M3.
 4. **The between-flight test at pair borders** (§4.1): which strip to use and what
    counts as a pass. Design it with M3.
-5. **Excluding flagged pairs or tiles** (§4.7): decided from the QC report, before M5
-   results are examined.
+5. **Flagged pairs** (§4.7, D7): rank 5 is corrected (+41.82 m). Whether any of the 16
+   moderate pairs are corrected or excluded is decided in M3, after ADR 009's noise
+   test on one of them, and before M5 results are examined.
 6. **Benchmarks:** the untiled EV1 figures are in §5. M3 replaces them with per-unit
    measurements.

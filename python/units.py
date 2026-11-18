@@ -44,6 +44,16 @@ TILE_M = 1000
 # Retiled parts carry no CRS record; the plan, the tiles and every G-LiHT LAS are in this.
 UNIT_CRS = "EPSG:32620"
 BUFFER_M = MAX_SEARCH_M  # 2018 reference beyond the unit's bounds: the search cap
+# Per-campaign vertical corrections (a datum mismatch, decided case by case and recorded).
+VERTICAL_OFFSETS = Path(__file__).resolve().parent.parent / "derived" / "registration" / "vertical_offsets.csv"
+
+
+def vertical_offset(campaign):
+    """Metres added to a campaign's z, from derived/registration/vertical_offsets.csv (0 if none)."""
+    if not VERTICAL_OFFSETS.is_file():
+        return 0.0
+    table = pd.read_csv(VERTICAL_OFFSETS).set_index("campaign")["dz_m"]
+    return float(table.get(campaign, 0.0))
 
 
 def load_units():
@@ -111,9 +121,15 @@ def campaign_dtm(campaign):
 
 def unit_key(unit):
     """What the plan says about a unit; a cache built for another key is stale."""
-    return {"unit": unit.unit, "tile": unit.tile, "rank": int(unit["rank"]),
-            "campaign_pre": unit.campaign_pre, "campaign_post": unit.campaign_post,
-            "bounds": [int(unit.xmin), int(unit.ymin), int(unit.xmax), int(unit.ymax)]}
+    key = {"unit": unit.unit, "tile": unit.tile, "rank": int(unit["rank"]),
+           "campaign_pre": unit.campaign_pre, "campaign_post": unit.campaign_post,
+           "bounds": [int(unit.xmin), int(unit.ymin), int(unit.xmax), int(unit.ymax)]}
+    # Only when there is one, so uncorrected units keep their cache identity.
+    if vertical_offset(unit.campaign_pre):
+        raise ValueError(f"{unit.campaign_pre}: vertical offsets are only applied to 2018 campaigns")
+    if vertical_offset(unit.campaign_post):
+        key["post_vertical_offset_m"] = vertical_offset(unit.campaign_post)
+    return key
 
 
 def unit_config(unit, digest, dtm):
@@ -149,6 +165,8 @@ def empty_arrays(directory, n_pre=0):
 def prepare_unit(unit):
     """Build (or reuse) one unit's distance cache; returns its manifest."""
     owns, digest = ownership(unit)
+    transform = np.eye(4)
+    transform[2, 3] = vertical_offset(unit.campaign_post)
     box = reference_box(unit)
     pre_parts = bucket_parts(unit.campaign_pre, [unit.tile])
     post_parts = bucket_parts(unit.campaign_post, tiles_in(box))
@@ -189,7 +207,7 @@ def prepare_unit(unit):
         if post_parts:
             n_post, post_min, post_max = stream_epoch(
                 post_parts, counts[len(pre_parts):], directory, coverage, owns, CHUNK_SIZE,
-                keep=in_box)
+                transform=transform, keep=in_box)
         if n_pre == 0:
             # A unit with no 2017 returns in its columns (a data hole): a complete, empty
             # cache, so it is not retried forever.
@@ -257,7 +275,9 @@ def prepare_unit(unit):
             "coverage": {"origin_xy": [0, 0], "resolution_m": COVERAGE_RESOLUTION,
                          "min_pre_returns": MIN_PRE_RETURNS,
                          "min_post_returns": MIN_POST_RETURNS},
-            "registration": {"post_transform": np.eye(4).tolist(), "assessment": "not_assessed"},
+            "registration": {"post_transform": transform.tolist(),
+                             "assessment": ("vertical_offset_table" if transform[2, 3]
+                                            else "not_assessed")},
             "height_above_ground_available": True,
             "post_lowest_return": post_lowest_description(),
         }

@@ -71,7 +71,7 @@ GAP_COLUMNS = [
     "xmin", "xmax", "ymin", "ymax", "zmin", "zmax",
     "mean_c2c_m", "max_c2c_m", "mean_hag_m", "min_hag_m", "max_hag_m",
     "n_tiles", "n_pairs", "main_pair_rank", "main_pair_share", "crosses_pair_border",
-    "edge_columns", "touches_coverage_edge",
+    "edge_columns", "touches_coverage_edge", "main_pair_flags", "main_pair_flagged",
 ]
 
 
@@ -461,6 +461,17 @@ def join(root, threshold, plan):
     })
     table["crosses_pair_border"] = table.n_pairs > 1
     table["touches_coverage_edge"] = table.edge_columns > 0
+    # The main pair's registration flags from island QC (decided 2026-11-18: flagged
+    # pairs are kept and flagged; M3 decides whether any are corrected or excluded).
+    qc_pairs = canopy.DATA / "runs" / "canopy" / "qc" / plan_hash()[:16] / "pairs.csv"
+    if qc_pairs.is_file():
+        flags = pd.read_csv(qc_pairs).set_index("rank")["flags"].fillna("")
+        table["main_pair_flags"] = flags.reindex(table.main_pair_rank.to_numpy()).fillna("").to_numpy()
+    else:
+        canopy.stamp(f"no island QC at {qc_pairs.parent}: main_pair_flags left empty "
+                     "(run island_qc.py first to fill them)")
+        table["main_pair_flags"] = ""
+    table["main_pair_flagged"] = table.main_pair_flags != ""
     table = table[GAP_COLUMNS]
 
     out = root / "gaps" / name
