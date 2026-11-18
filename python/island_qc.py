@@ -10,7 +10,10 @@ recorded in the plan before the island-wide results are examined (M5).
 Writes $PR_GAPS_DATA/runs/canopy/qc/<plan id>/:
   units.csv   one row per unit: check_run.py's step-1 metrics and PASS/WARN/FAIL
   pairs.csv   registration per flight pair, pooled over its units: ground-return C2C
-              median and p95, ground height above DTM, share of distances at the cap
+              median and p95, ground height above DTM, share of distances at the cap,
+              and ground_dz: the lowest 2018 return in a 2017 ground return's column
+              minus its height (about 0 when registered; ~C2C for a vertical shift,
+              ~0 with a large C2C for a sideways shift or no 2018 ground)
   tiles.gpkg  one square per tile with the same registration figures, covered hectares,
               and, per finished gap threshold, gap area fraction and largest-gap share
   checks.txt  island-wide checks, flags and the summary
@@ -49,7 +52,7 @@ def unit_metrics(row):
     cache = plan_units.UNITS / unit / "cache"
     out = {"unit": unit, "tile": row["tile"], "rank": row["rank"], "area_ha": row["area_ha"]}
     if not (cache / "manifest.json").is_file():
-        return {**out, "status": "FAIL", "problems": "no cache"}, None, None
+        return {**out, "status": "FAIL", "problems": "no cache"}, None, None, None
     manifest, arrays = canopy.load_cache(cache)
     n = manifest["point_count"]
     valid = np.asarray(arrays["valid"])
@@ -71,6 +74,22 @@ def unit_metrics(row):
         "ground_points": int(ground.sum()),
     })
     g_c2c, g_hag = c2c[ground], hag[ground]
+    # Lowest 2018 return in each 2017 ground return's column, minus that return's height:
+    # about 0 where both flights reach the ground. A large C2C with dz near 0 means a
+    # sideways shift (or no 2018 ground); dz near the C2C means a vertical shift.
+    g_dz = np.zeros(0)
+    if "post_lowest" in arrays and ground.any():
+        rows = np.flatnonzero(ground)
+        if len(rows) > 4 * SAMPLE:
+            rows = np.sort(np.random.default_rng(zlib.crc32(unit.encode())).choice(rows, 4 * SAMPLE, replace=False))
+        xyz = np.asarray(arrays["xyz"][rows])
+        keys = canopy.row_keys(np.column_stack((np.asarray(ledger["ix"]), np.asarray(ledger["iy"]))))
+        at = np.searchsorted(keys, canopy.row_keys(canopy.xy_cells(xyz, cov["resolution_m"])))
+        at = np.minimum(at, len(keys) - 1)
+        g_dz = np.asarray(arrays["post_lowest"])[at] - xyz[:, 2]
+        g_dz = g_dz[np.isfinite(g_dz)]
+        if len(g_dz):
+            out["ground_dz_p50"] = float(np.median(g_dz))
     g_hag = g_hag[np.isfinite(g_hag)]
     if len(g_c2c):
         out["ground_c2c_p50"], out["ground_c2c_p95"] = np.percentile(g_c2c, [50, 95])
@@ -91,7 +110,7 @@ def unit_metrics(row):
     out["problems"] = "; ".join(problems + warnings)
     rng = np.random.default_rng(zlib.crc32(unit.encode()))  # same sample every run
     pick = lambda a: a[rng.choice(len(a), SAMPLE, replace=False)] if len(a) > SAMPLE else a  # noqa: E731
-    return out, pick(g_c2c).astype(np.float32), pick(g_hag).astype(np.float32)
+    return out, pick(g_c2c).astype(np.float32), pick(g_hag).astype(np.float32), pick(g_dz).astype(np.float32)
 
 
 def pooled(samples, prefix):
@@ -175,17 +194,19 @@ def main():
                 canopy.stamp(f"{i:,} of {len(rows):,} units")
     units = pd.DataFrame([r[0] for r in results])
     units.to_csv(out / "units.csv", index=False)
-    samples = {r[0]["unit"]: (r[1], r[2]) for r in results if r[1] is not None}
+    samples = {r[0]["unit"]: (r[1], r[2], r[3]) for r in results if r[1] is not None}
 
     pairs = pd.read_csv(canopy.PLAN / "pairs.csv")[["rank", "campaign_a", "campaign_b", "block_a", "owned_ha"]]
     pair_rows = []
     for rank, members in units.groupby("rank"):
         c2c = [samples[u][0] for u in members.unit if u in samples]
         hag = [samples[u][1] for u in members.unit if u in samples]
+        dz = [samples[u][2] for u in members.unit if u in samples]
         row = {"rank": rank, "units": len(members), "covered_ha": members.covered_ha.sum(),
                "capped_share": np.average(members.capped_share.fillna(0), weights=members.points.fillna(0) + 1e-9),
                **pooled(np.concatenate(c2c) if c2c else np.zeros(0), "ground_c2c"),
-               **pooled(np.concatenate(hag) if hag else np.zeros(0), "ground_hag")}
+               **pooled(np.concatenate(hag) if hag else np.zeros(0), "ground_hag"),
+               **pooled(np.concatenate(dz) if dz else np.zeros(0), "ground_dz")}
         flags = []
         if row.get("ground_c2c_p50", 0) > GROUND_C2C_FLAG_M:
             flags.append("registration: ground C2C median > 0.5 m")
@@ -200,10 +221,12 @@ def main():
     for tile, members in units.groupby("tile"):
         c2c = [samples[u][0] for u in members.unit if u in samples]
         hag = [samples[u][1] for u in members.unit if u in samples]
+        dz = [samples[u][2] for u in members.unit if u in samples]
         x0, y0 = plan_units.tile_corner(tile)
         tile_rows.append({"tile": tile, "units": len(members), "covered_ha": members.covered_ha.sum(),
                           **pooled(np.concatenate(c2c) if c2c else np.zeros(0), "ground_c2c"),
                           **pooled(np.concatenate(hag) if hag else np.zeros(0), "ground_hag"),
+               **pooled(np.concatenate(dz) if dz else np.zeros(0), "ground_dz"),
                           "geometry": box(x0, y0, x0 + plan_units.TILE_M, y0 + plan_units.TILE_M)})
     tiles = gpd.GeoDataFrame(tile_rows, crs=plan_units.UNIT_CRS)
     island_root, maps = gap_maps(list(tiles.tile))
@@ -225,7 +248,8 @@ def main():
                  f"{len(pair_table)} pairs flagged")
     for row in flagged.itertuples():
         lines.append(f"   rank {row.rank} {row.campaign_a} -> {row.campaign_b}: {row.flags} "
-                     f"(ground C2C median {row.ground_c2c_p50:.2f} m, height {row.ground_hag_p50:+.2f} m)")
+                     f"(ground C2C median {row.ground_c2c_p50:.2f} m, height {row.ground_hag_p50:+.2f} m, "
+                     f"2018 lowest - 2017 ground {getattr(row, 'ground_dz_p50', float('nan')):+.2f} m)")
     duplicates = duplicate_check(plan)
     lines += duplicates
     lines.append(f"gap maps: {', '.join(maps) or 'none yet'} (island run {island_root.name})")
