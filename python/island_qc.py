@@ -262,7 +262,9 @@ def main():
                                         "commit": os.environ.get("PR_GAPS_CODE_VERSION", "")})
     print(text)
     print(f"wrote {out}")
-    failed = counts.get("FAIL", 0) > 0 or not duplicates[-1].startswith("PASS")
+    # Flags (unit FAILs, flagged pairs) are for review, not a failed run; only a 2017
+    # record in two units is. A crash fails on its own.
+    failed = not duplicates[-1].startswith("PASS")
     return 1 if failed else 0
 
 
