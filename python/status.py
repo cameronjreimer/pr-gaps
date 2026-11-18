@@ -96,6 +96,21 @@ def area_done(task):
     return False
 
 
+def qc_done(task):
+    """QC of this plan with every unit cached and every gap threshold mapped."""
+    import hashlib
+
+    import island_gaps
+
+    plan_hash = hashlib.sha256((PLAN_DIR() / "plan.json").read_bytes()).hexdigest()
+    marker = DATA / "runs" / "canopy" / "qc" / plan_hash[:16] / "qc.json"
+    if not marker.is_file():
+        return False
+    record = json.loads(marker.read_text(encoding="utf-8"))
+    wanted = sorted(island_gaps.label(t) for t in island_gaps.SETTINGS["thresholds"])
+    return record.get("missing_caches") == 0 and sorted(record.get("gap_maps", [])) == wanted
+
+
 def PLAN_DIR():  # noqa: N802
     from canopy import PLAN
 
@@ -152,6 +167,7 @@ STAGES = {
     "label": (label_tasks, label_done),
     "join": (join_tasks, join_done),
     "points": (step1_tasks, points_done),
+    "qc": (lambda: ["all"], qc_done),
 }
 
 

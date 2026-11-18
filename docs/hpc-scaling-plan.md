@@ -508,6 +508,17 @@ per 2017 point per threshold, as in D5.
     removes. Summed by forest type, it gives the denominators.
   - **Script:** `python/area.py`, one job, run after `voxels`. It doesn't need the gap
     outputs.
+  - **Built (2026-11-17)** as the workflow stage `area`, which runs after `step1`.
+    - **Inputs:** coverage comes from the unit caches. Masks and zones are sampled at
+      each column's centre: Hansen and C-CAP at 30 m, and Holdridge zones rasterised at
+      10 m.
+    - **Masks:** Hansen forest = treecover2000 ≥ `--treecover` (default 30%, ADR 007's
+      placeholder) with no loss in 2001–2016. C-CAP forest = codes 9, 10, 11, 13, 16.
+      Both are recorded, along with their intersection and union.
+    - **Outputs:** `runs/canopy/area/<id>/areas.csv` (pair × forest type) and
+      `areas_by_unit.csv`.
+    - **Tested:** on the two EV1 units, 154.6 ha owned and 152.4 ha covered, in about
+      2 s per unit (~1.5 h island-wide).
 
 ### 4.7 Quality control
 
@@ -522,6 +533,17 @@ per 2017 point per threshold, as in D5.
   - gap area fraction per tile;
   - the share of the largest gap per tile.
 - **Spot checks:** a few dozen of the largest gaps against orthophotos.
+- **Built (2026-11-17):** `python/island_qc.py`, the workflow stage `qc`.
+  - **How it runs:** it reads each unit cache once, in parallel, and keeps 50,000
+    sampled ground returns per unit for the pooled pair and tile figures.
+  - **Output:** `runs/canopy/qc/<plan id>/`. Gap maps are added for every threshold
+    whose join is finished. Run it after step 1 for the registration checks, and again
+    after step 2.
+  - **Dropped:** the "unit points sum to bucket totals" check, because units take only
+    owned columns. The duplicate check (no record in two units, campaign by campaign)
+    covers the same failure.
+  - **Tested:** on the two EV1 units, both PASS. The EV1 pair's ground C2C median is
+    0.21 m and its height median about 0, so nothing is flagged.
 - **The island QC report** (`python/island_qc.py`, the last stage) collects all of the
   above into `qc/` under the run directory:
   - **`units.csv`:** the per-unit `check_run.py` results, one row per unit, with
@@ -709,9 +731,9 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | DTM mosaics | `python/campaign_dtm.py` | **Built.** §4.3; one job (114 small rasters) |
 | Per-unit mode for `canopy.py` | `canopy.py` (`--job`, `--unit`) → `python/units.py` | **Built.** §4.4. Reuses `prepare` / `analyze_threshold`; ownership-mask clipping; bounding-box reference. The search cap (D2), dropped `.bin` (D4) and lowest 2018 return (D1) are already in `canopy.py` |
 | Step 2: unit voxels, tile labels, join, point labels | **Built.** `python/island_gaps.py` (`voxels --job N`, `label --tile T`, `join --threshold T`, `points --job N`) | §4.5. Reuses `_components`, `_number_by_first_cell` and the attribute code from `canopy.py` |
-| Area accounting | `python/area.py` | §4.6. Coverage columns × pair × forest type × mask |
+| Area accounting | `python/area.py` | **Built.** §4.6. Coverage columns × pair × forest type × mask |
 | Workflow + status | `workflow/` (`config.sh`, `env.sh`, `stage.sbatch`, `submit.sh`), `python/status.py` | **Built** for `retile` and `dtm` (§5.1). A stage is added by giving it a command in `stage.sbatch` and a task list and done test in `status.py` |
-| QC report | `python/island_qc.py` | §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |
+| QC report | `python/island_qc.py` | **Built.** §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |
 | DTM check | `check_download.py --products dtm` | **Built.** §4.3 |
 
 **Build order:**
@@ -720,7 +742,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 3. `canopy.py --job` (built; LFDP comparison passed) → **M2 step-1 test on EV1** (on the cluster);
 4. `island_gaps.py` → **M2 step-2 test on EV1**;
 5. `workflow/` and `status.py` (built). Each new stage is added to them as it is built;
-6. `area.py` and `island_qc.py`, before M4.
+6. `area.py` and `island_qc.py` (built), before M4.
 
 ## 9. Afterwards: the recovery interval
 
