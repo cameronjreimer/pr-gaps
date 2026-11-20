@@ -261,6 +261,7 @@ are missing, much smaller than listed, or left as `.part`. `--products dtm` chec
 | `area.py [--treecover 30]` | Owned, covered and forest hectares (Hansen, C-CAP) per flight pair and Holdridge zone: the per-hectare denominators | `runs/canopy/area/<id>/` |
 | `island_qc.py` | Per-unit checks, registration per pair and per tile, gap maps per threshold, duplicate check; flags only | `runs/canopy/qc/<plan id>/` |
 | `subset_plan.py --pairs R` / `--units U…` | A plan holding only some units, for testing on part of the island (`PR_GAPS_PLAN=<dir>`) | the folder given |
+| `windows.py select` / `null NAME PRE POST` / `report` | ADR 009 (M3): the 25 ha windows, chosen once without looking at gaps; same-epoch null plans; separation per window and null ÷ Maria gap area | `interim/windows/`, `interim/nulls/<name>/` (plan folders); `runs/canopy/adr009/` |
 | `check_tiling.py <site> [--gaps RUN --island DIR]` | M2 test: units (and island gaps) against an untiled site run | prints PASS/FAIL |
 | `canopy.py --job N` / `--unit ID` (`units.py`) | Step 1 (distances) for work units, from the buckets, the ownership rasters and the campaign DTMs; check one with `check_run.py units/<unit>` | `runs/canopy/units/<unit>/cache/` |
 

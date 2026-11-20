@@ -35,9 +35,9 @@ damage and trims every gap's edge further.
 | **Separation** | The largest gap holds ≤ **10%** of gap volume | every prototype window |
 | **Field agreement** | 40 m quadrat R² of gap area against stem loss **and** against basal-area loss is ≥ 90% of the best candidate's | LFDP (the only census) |
 
-The two 10% values are proposals. Confirm or change them here, dated, **before**
-the null is run. Prototype windows are 500 × 500 m (25 ha) study areas, LFDP-scale,
-each run as a `canopy.py` site. Separation is a share of gap volume, so it falls
+The two 10% values were **confirmed on 2026-11-20**, before any null was run.
+Prototype windows are 500 × 500 m (25 ha) study areas, LFDP-scale,
+each run as a small work-unit plan (`python/windows.py`, hpc-scaling-plan §7.1). Separation is a share of gap volume, so it falls
 with area by itself and must be judged on windows of a fixed size, never on EV1 or
 a campaign as a whole. Choose at least one window per forest-type stratum from
 `derived/inventory/pr_repeat_tiles.csv` and the forest-type layer before looking at
@@ -122,6 +122,12 @@ Before the rule can select final values:
    `python/sweep.py --thresholds 2 3 4 5`. Short dry forest is the likely failure
    (plan §4, confound 3).
 3. **Fill in the selected values** and change Status to Accepted.
+
+Built (2026-11-20): `python/windows.py` chooses the windows (`select`), builds null plans
+(`null`; a second null, `PR_12March2017_FIA18` vs `PR_14March2017_FIA18`, adds a forest
+type and block outside EV1) and reports both tests (`report`); see hpc-scaling-plan §7.1.
+Decided 2026-11-20: observability does not enter the gap definition (it is a per-gap
+covariate), and dry windows use the same eligibility rules as the other strata.
 
 Step 1 for all campaigns can start before then, because none of these settings
 changes it. One exception: the planned observability flag and post-canopy height
