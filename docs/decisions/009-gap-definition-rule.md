@@ -165,6 +165,19 @@ failures alongside the gap-object results. Rules 3–5 are unchanged: 26-connect
 connected components, and the sensitivity set (6-connectivity at 3 m, 2 m and 4 m, the
 seeded split, the extent product at 3 m).
 
+**Very large 3 m objects (decided by the user, 2026-11-21).** The M5 checks found
+canopy-level sheets of 50–194 ha. The largest is 194 ha (7.67 M m³) on pair 19 (FIA36),
+and it holds 99.5% of the gap volume in its 1 km tile. EV1's largest gap at 3 m is 15.8 ha.
+- These objects are reported as they are, and not split or removed.
+- Gap-size distributions (Q1–Q3) are fitted and reported both with and without the
+  largest objects.
+- The cut-off for "largest" is fixed before the fits are run.
+- The seeded split, the rule-5 method that breaks merged gaps apart, is not built for the
+  island pipeline (`island_gaps.py`; only `canopy.py` sites have it), so it stays
+  unrun for now.
+- The 6-connectivity run at 3 m needs no new code. It is scripted in
+  `/workdir/cr657/m3/run_sensitivity.sh`.
+
 Step 1 for all campaigns can start before then, because none of these settings
 changes it. One exception: the planned observability flag and post-canopy height
 (point-gaps-plan §2.2, §2.4) collect data while the 2018 points are read. If they

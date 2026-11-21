@@ -51,6 +51,8 @@ case "$STAGE" in
     join)   "$PYTHON" -u python/island_gaps.py join --threshold "$TASK" ;;
     points) "$PYTHON" -u python/island_gaps.py points --job "$TASK" ;;
     qc)     "$PYTHON" -u python/island_qc.py ;;
+    gapcov) "$PYTHON" -u python/gap_covariates.py tile --tile "$TASK" ;;
+    gapcovjoin) "$PYTHON" -u python/gap_covariates.py combine ;;
     *)      echo "Unknown stage $STAGE" >&2; exit 1 ;;
 esac
 echo "[$(date '+%F %T')] finished"

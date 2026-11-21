@@ -753,7 +753,7 @@ sensitivity set.
   - The biggest gaps are canopy-level sheets about 3.5 m deep, with mean HAG around 18 m, on unflagged pairs: widespread crown loss joined into one component, not ground or registration error.
   - Caveat: a gap spanning several tiles is counted whole in its centroid tile.
 - **Flagged pairs:** 823 gaps (0.05%) lie on them. |
-| M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up |
+| M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up. **Built 2026-11-21:** `gap_covariates.py` for the 3 m gap objects (§8). After it runs, the user picks the Hansen threshold and keep rule from `mask_comparison.csv` and `areas.csv`. Gap-size fits are reported with and without the largest objects (ADR 009 *Outcome*) |
 
 M4 can run while M3's ADR is being finalised, since step 1 doesn't depend on the threshold.
 
@@ -797,6 +797,7 @@ Primary island-wide gap results (M5) are only examined after ADR 009 is Accepted
 | QC report | `python/island_qc.py` | **Built.** §4.7. Reuses `check_run.py`'s checks per unit; pair, tile and island-wide tables |
 | ADR 009 windows and nulls | `python/windows.py` | **Built.** §7.1. `select`, `null`, `report` |
 | DTM check | `check_download.py --products dtm` | **Built.** §4.3 |
+| Forest mask + covariates per gap | `python/gap_covariates.py` (`tile --tile T`, `combine`); workflow stages `gapcov` (per tile) and `gapcovjoin` | **Built 2026-11-21.** §4.6, M6. Every gap column is sampled at its centre, as `area.py` does. Per gap: forest fractions (Hansen at treecover 10, 30 and 50%; C-CAP; union and intersection at 30), Holdridge, C-CAP, GAP and Helmer modes, PRISM, and from the column's own 2017 campaign elevation, slope, aspect, CHM and 41 m rugosity. `combine` also writes `mask_comparison.csv` (ADR 007). No keep rule is applied. Tested on the window plan (15 tiles, 14,028 gaps, footprints match the gap table); 4–13 s and under 1 GB per tile |
 
 **Build order:**
 1. `check_download.py --products dtm` (built);

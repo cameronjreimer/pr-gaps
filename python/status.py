@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from canopy import DATA, GLIHT  # noqa: E402
 
 WORKFLOW = Path(os.environ.get("PR_GAPS_WORKFLOW") or DATA / "workflow")
-ORDER = ["retile", "dtm", "step1", "area", "voxels", "label", "join", "points", "qc"]
+ORDER = ["retile", "dtm", "step1", "area", "voxels", "label", "join", "points", "qc", "gapcov", "gapcovjoin"]
 
 
 # ------------------------------------------------------------- stage definitions
@@ -158,6 +158,18 @@ def points_done(task):
     return all(gaps.unit_points_done(root, unit) for unit in job_units(task))
 
 
+def gapcov_done(task):
+    import gap_covariates
+
+    return gap_covariates.tile_done(task)
+
+
+def gapcovjoin_done(task):
+    import gap_covariates
+
+    return gap_covariates.combine_done()
+
+
 STAGES = {
     "retile": (retile_tasks, retile_done),
     "dtm": (lambda: ["all"], dtm_done),
@@ -168,6 +180,8 @@ STAGES = {
     "join": (join_tasks, join_done),
     "points": (step1_tasks, points_done),
     "qc": (lambda: ["all"], qc_done),
+    "gapcov": (label_tasks, gapcov_done),
+    "gapcovjoin": (lambda: ["all"], gapcovjoin_done),
 }
 
 
