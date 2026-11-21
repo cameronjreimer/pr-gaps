@@ -594,6 +594,31 @@ output. The files that run them are described in §5.1.
   retile). Use `--array=1-N%M` anyway to stay a good neighbour on a shared cluster:
   start with `%20` for step 1 and raise it if the queue is empty.
 - **Benchmark:** `sacct` per stage gives time and memory per unit, which updates the table.
+  - **Measured on the island run (M3, 2026-11-20).** These figures replace the estimates
+    below. Sources: `status.csv` and `sacct` for the final arrays of plan `833917a203ca7ff1`
+    (retile 793818; step1 797101/797294/798194; area 798184; voxels 798253; label 798254;
+    join 798255; points 798256; qc 798257). Every task completed. Peak RSS is per task,
+    from the `.batch` step.
+
+    | Stage | Tasks | Requested | Wall median / p95 / max | Peak RSS median / p95 / max |
+    |---|---|---|---|---|
+    | retile | 3,066 | 1 CPU, 4 GB | 27 s / 62 s / 170 s | – / 0.45 / 0.51 GB |
+    | step1 (≈3.2 units per job) | 764 | 8 CPUs, 16 GB | 164 s / 378 s / 861 s | 2.0 / 4.5 / 7.1 GB |
+    | voxels | 764 | 2 CPUs, 8 GB | 67 s / 118 s / 241 s | 0.7 / 1.8 / 4.1 GB |
+    | label | 1,821 | 2 CPUs, 4 GB | 40 s / 111 s / 202 s | 0.3 / 0.8 / 1.4 GB |
+    | join (2 / 3 / 4 / 5 m) | 4 | 8 CPUs, 64 GB | 16.2 / 9.1 / 7.9 / 6.9 min | 22.8 / 10.9 / 6.1 / 3.7 GB |
+    | points | 764 | 2 CPUs, 8 GB | 69 s / 115 s / 241 s | 0.7 / 1.7 / 3.5 GB |
+    | area | 1 | 2 CPUs, 16 GB | 22.7 min | 1.1 GB |
+    | qc | 1 | 8 CPUs, 64 GB | 48.2 min | 14.0 GB |
+
+    - Per unit, step 1 takes 73 s median (p95 154 s) of an 8-CPU job.
+    - Step 1 for the island took 287 allocated CPU-hours, against the 720 estimated
+      below. CPU efficiency was a median 1.45 of 8 CPUs.
+    - Every request is at least 2× the observed peak. `join` stays on `R128C40`: its peak
+      is 23 GB at 2 m, far below ~120 GB.
+    - `config.sh` could tighten some requests (step1 12 GB, join 48 GB, voxels/points
+      1 CPU). It was left unchanged because the user decides that, and the cluster clone
+      should not diverge.
   - **Untiled EV1** (job 792239, 2026-11-03): 926 ha, 16 CPUs, steps 1 and 2 in one job.
     It took 42 min and peaked at 42.8 GB. That is about 0.73 CPU-minutes and 46 MB per
     hectare.
@@ -715,7 +740,7 @@ sensitivity set.
 | M0 | Done. D3 settled 2026-11-17. Done 2026-11-03: array limits and nodes read (§5); all 3,067 LAS files present (`check_download.py`). D1, D2, D4, D5 and storage are settled | – |
 | M1 | Work-unit plan (§4.1) built and mapped | Units cover 58,801 ha exactly once; no 2017 location in two units |
 | M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run. **Passed 2026-11-17** on the cluster: `check_tiling.py ev1` (step 1: identical distances, every point in exactly one unit) and `check_tiling.py ev1 --gaps e2adac6119af3dc7 --island dd6164997a92c379` (step 2 at 2 m and 5 m: every gap away from the study-area edge is the same set of points) |
-| M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted. **Tools built 2026-11-20:** `python/windows.py` (`select`, `null`, `report`); windows and nulls run as small plans through the same workflow (§7.1) |
+| M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted. **Tools built 2026-11-20:** `python/windows.py` (`select`, `null`, `report`); windows and nulls run as small plans through the same workflow (§7.1). **Done 2026-11-20/21:** windows and both nulls run; the report showed no candidate passing all tests (ADR 009 *Outcome*). The user chose T = 3 m on 2026-11-21, and ADR 009 is Accepted. Benchmarks are in §5 |
 | M4 | Full step 1 (all units) | Every unit complete; QC maps (ground C2C per tile) show no registration blocks. **Done 2026-11-19:** all 764 jobs; QC 2,257 PASS / 138 WARN / 45 FAIL units (all DTM / height-above-ground, not registration); rank 5 corrected (D7) and verified after the rerun (ground_dz −0.18 m, ground C2C median 0.30 m, unflagged); 16 moderate pairs flagged; no 2017 record in two units; 55,763.9 of 58,944.4 owned ha covered |
 | M5 | Step 2 + join: primary threshold, then the ADR 009 sensitivity set | `check_run`-style consistency; largest gap per tile within the separation test. **Run 2026-11-20** at all four candidates (2–5 m, island run `df81889aa38eecef`), since step 2 is cheap and the ADR picks among them. Only counts were checked (gaps fall with threshold; 0.04% of gaps on flagged pairs). **The gap results are not examined until ADR 009 is Accepted** |
 | M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up |
@@ -794,7 +819,7 @@ Decisions still open. None blocks building M2.
 2. **Observability rule:** settled 2026-11-20. It does **not** enter the gap definition:
    gaps stay pure C2C, and observability (from the lowest 2018 return per column, D1) is
    reported per gap as a covariate or flag. So ADR 009's tests don't depend on it.
-3. **ADR 009:**
+3. **ADR 009:** Accepted 2026-11-21 with T = 3 m for gap objects (the user's choice after M3: no candidate passed every test; see the ADR's *Outcome*). History:
    - the two 10% limits: confirmed 2026-11-20;
    - choose the 25 ha windows per forest type, dry forest included, before looking at
      their gaps;

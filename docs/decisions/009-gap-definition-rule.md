@@ -1,9 +1,10 @@
 # 009 — How the gap definition for the full run is chosen
 
 **Date:** 2026-11-02
-**Status:** Proposed. The rule is set; the threshold it selects is provisional until
-the tests under *Consequences* have run. Update this file to Accepted, with the date
-and the selected values, before island-wide gap results are examined.
+**Status:** Accepted 2026-11-21. Gap objects use **T = 3 m**, 26-connectivity and
+connected components. Damage extent uses 2 m. The user chose 3 m after the M3 tests,
+although 3 m does not pass rule 2 as written: no candidate passed all three tests (see
+*Outcome*).
 **Bears on:** plan §2.4 threshold, §2.5 minimum gap size, §2.12 parameter freeze,
 §3.3 vertical criterion, §4 confounds 2–4; Q1–Q4, Q11;
 [point-gaps-plan.md](../point-gaps-plan.md) §2.1, §2.5
@@ -128,6 +129,41 @@ Built (2026-11-20): `python/windows.py` chooses the windows (`select`), builds n
 type and block outside EV1) and reports both tests (`report`); see hpc-scaling-plan §7.1.
 Decided 2026-11-20: observability does not enter the gap definition (it is a per-gap
 covariate), and dry windows use the same eligibility rules as the other strata.
+
+## Outcome (M3, 2026-11-20/21)
+
+`windows.py report` (`runs/canopy/adr009/`, window run `2dcfab31814e5648`, nulls `ev1`
+`b36a7877a7b3e78c` and `fia18` `36bea6a13c7cb33e`). The windows were drawn once with
+seed 20170920 before any of their gaps were seen: 3 each in dry, moist, wet and montane,
+and 3 in EV1. 4 dry, 109 moist, 116 wet and 9 montane windows were eligible, and 21 in
+EV1.
+
+| T | Separation: windows passing (of 15) | Noise, EV1 null (155 ha) | Noise, FIA18 null (860 ha) | Field (LFDP) |
+|---|---|---|---|---|
+| 2 m | 2 | FAIL 20.2% | pass 8.7% | pass |
+| 3 m | 5 | FAIL 11.5% | pass 7.0% | pass |
+| 4 m | 8 | pass 8.3% | pass 7.6% | fail |
+| 5 m | 7 | pass 7.5% | pass 9.5% | fail |
+
+- **No candidate passes all three tests in every window,** so rule 2 selects none.
+  Rule 6 does not cover this case, because the failure is not confined to particular
+  strata.
+- **Results at 3 m:**
+  - Separation fails in 10 of 15 windows, and in every stratum: dry W02 35.1% and
+    W03 17.1%; moist W04 14.3% and W05 17.5%; wet W07 18.6% and W08 22.2%; montane W10
+    10.3%, W11 16.5% and W12 19.9%; EV1 W14 12.2%. These counts are from `windows.csv`.
+  - The EV1 null fails noise by 1.5 points.
+- **Several dry windows hold very few gaps,** so their shares are unstable. W02 has 54
+  gaps at 2 m, 7 at 3 m and none at 5 m.
+- **Separation often rises with T** (W01–W04, W11). With few gaps, one gap holds a large
+  share whether or not gaps merge, and the test as written cannot tell the two apart.
+
+**Decision (user, 2026-11-21): gap objects use T = 3 m.** This is made after the tests
+were seen, and it departs from rule 2. 3 m is the highest candidate that passes field
+agreement, and it is LFDP's provisional answer. Report its separation and EV1-noise
+failures alongside the gap-object results. Rules 3–5 are unchanged: 26-connectivity,
+connected components, and the sensitivity set (6-connectivity at 3 m, 2 m and 4 m, the
+seeded split, the extent product at 3 m).
 
 Step 1 for all campaigns can start before then, because none of these settings
 changes it. One exception: the planned observability flag and post-canopy height
