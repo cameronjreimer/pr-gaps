@@ -62,7 +62,7 @@ What EV1 (untiled, 711 M points read) showed:
 | D4 | Keep `source_c2c.bin` (CloudCompare file)? | **Settled (2026-11-03): dropped** (`SAVE_CC_BIN = False`) | A CloudCompare-format copy of the 2017 cloud with its distances, for viewing in the CloudCompare GUI. It duplicates `xyz.npy` + `c2c.npy`; nothing reads it. ~20 B/point (LFDP cache 642 → 461 MB), ~0.3 TB island-wide |
 | D5 | Point labels for sensitivity runs | **Settled (2026-11-03): keep the distance caches, and point labels for every threshold run** | Storage is not limiting. The caches (per-point distances) are what allow any threshold to be computed later; labels are per-threshold outputs (4 B/point, ~54 GB each), recomputable from the caches in minutes per unit |
 | D6 | ADR 009 tests (null, 25 ha windows) | Run during §7 milestones M1–M3 | Step 2's primary threshold is chosen by them; step 1 doesn't depend on them |
-| D7 | Flagged pairs from island QC (§4.7, 2026-11-18) | **Settled (2026-11-18).** Rank 5 (`PR_14March2017_FIA11 → PR_28April2018_FIA11`): the lowest 2018 return in each column sat 42.00 m below the 2017 ground (EV1: −0.18 m), matching Puerto Rico's ~42 m geoid separation, so 2018 FIA11 is almost certainly in ellipsoidal heights. It is corrected by a constant **+41.82 m**, recorded in `derived/registration/vertical_offsets.csv` and applied by `units.py` to that campaign's 2018 points; only the affected units rebuild. The 16 other flagged pairs (ground C2C median 0.5–1 m, or ground height off ±0.3 m) are **kept and flagged**. `main_pair_flags` / `main_pair_flagged` are carried into the gap table, and one flagged pair goes into ADR 009's noise test in M3; M3 decides whether any are corrected or excluded | Rank 5 would otherwise make nearly every point a change. The moderate pairs matter at 2 m more than at 3 m, which ADR 009's noise test measures |
+| D7 | Flagged pairs from island QC (§4.7, 2026-11-18) | **Settled (2026-11-18).** Rank 5 (`PR_14March2017_FIA11 → PR_28April2018_FIA11`): the lowest 2018 return in each column sat 42.00 m below the 2017 ground (EV1: −0.18 m), matching Puerto Rico's ~42 m geoid separation, so 2018 FIA11 is almost certainly in ellipsoidal heights. It is corrected by a constant **+41.82 m**, recorded in `derived/registration/vertical_offsets.csv` and applied by `units.py` to that campaign's 2018 points; only the affected units rebuild. The 16 other flagged pairs (ground C2C median 0.5–1 m, or ground height off ±0.3 m) are **kept and flagged**. `main_pair_flags` / `main_pair_flagged` are carried into the gap table, and one flagged pair goes into ADR 009's noise test in M3; M3 decides whether any are corrected or excluded. **Final (user, 2026-11-21): all 16 kept and flagged; none corrected or excluded.** Results are reported with and without them. The M3 noise test did not reach a flagged pair in any useful amount: only rank 149, as one EV1-null unit with 0.12 ha covered by both flights. 0.04% of 2 m gaps lie on flagged pairs | Rank 5 would otherwise make nearly every point a change. The moderate pairs matter at 2 m more than at 3 m, which ADR 009's noise test measures |
 
 ## 4. Design
 
@@ -742,7 +742,17 @@ sensitivity set.
 | M2 | Retile, per-unit step 1, per-unit step 2 and join implemented | **Tiling invariance on EV1:** tiled EV1 reproduces the untiled `ev1` run. **Passed 2026-11-17** on the cluster: `check_tiling.py ev1` (step 1: identical distances, every point in exactly one unit) and `check_tiling.py ev1 --gaps e2adac6119af3dc7 --island dd6164997a92c379` (step 2 at 2 m and 5 m: every gap away from the study-area edge is the same set of points) |
 | M3 | Pilot: 2–3 blocks, ~50–100 units in different forest types; same-epoch null; ADR 009's 25 ha windows | Per-unit time and memory benchmarked; null and windows give the ADR 009 values → ADR Accepted. **Tools built 2026-11-20:** `python/windows.py` (`select`, `null`, `report`); windows and nulls run as small plans through the same workflow (§7.1). **Done 2026-11-20/21:** windows and both nulls run; the report showed no candidate passing all tests (ADR 009 *Outcome*). The user chose T = 3 m on 2026-11-21, and ADR 009 is Accepted. Benchmarks are in §5 |
 | M4 | Full step 1 (all units) | Every unit complete; QC maps (ground C2C per tile) show no registration blocks. **Done 2026-11-19:** all 764 jobs; QC 2,257 PASS / 138 WARN / 45 FAIL units (all DTM / height-above-ground, not registration); rank 5 corrected (D7) and verified after the rerun (ground_dz −0.18 m, ground C2C median 0.30 m, unflagged); 16 moderate pairs flagged; no 2017 record in two units; 55,763.9 of 58,944.4 owned ha covered |
-| M5 | Step 2 + join: primary threshold, then the ADR 009 sensitivity set | `check_run`-style consistency; largest gap per tile within the separation test. **Run 2026-11-20** at all four candidates (2–5 m, island run `df81889aa38eecef`), since step 2 is cheap and the ADR picks among them. Only counts were checked (gaps fall with threshold; 0.04% of gaps on flagged pairs). **The gap results are not examined until ADR 009 is Accepted** |
+| M5 | Step 2 + join: primary threshold, then the ADR 009 sensitivity set | `check_run`-style consistency; largest gap per tile within the separation test. **Run 2026-11-20** at all four candidates (2–5 m, island run `df81889aa38eecef`), since step 2 is cheap and the ADR picks among them. Only counts were checked (gaps fall with threshold; 0.04% of gaps on flagged pairs). **The gap results are not examined until ADR 009 is Accepted** (Accepted 2026-11-21, T = 3 m). **Consistency checks run 2026-11-21:** 0 FAIL. The checker is `/workdir/cr657/m3/check_island.py`, which is not in the repo. Results:
+- **Completeness:** every unit, tile and join is complete, all from one commit (c2ba04f).
+- **Conservation:** points and voxels match exactly across units, tile labels and join at all four thresholds, and the 3 m point labels equal the gap table's 1,450,667,656 points.
+- **No duplicates:** object IDs are unique (1..1,805,219).
+- **Attributes:** all sane. 11 gaps have no height above ground.
+- **Thresholds:** gaps, points and voxels fall as T rises.
+- **Separation per 1 km tile (3 m, gaps assigned by volume centroid):** 559 of 1,720 tiles pass, holding 31% of gap volume. The median largest-gap share is 15.3%.
+  - The largest gap is 194 ha (7.67 M m³, 2.3% of island gap volume), on pair 19 (FIA36).
+  - The biggest gaps are canopy-level sheets about 3.5 m deep, with mean HAG around 18 m, on unflagged pairs: widespread crown loss joined into one component, not ground or registration error.
+  - Caveat: a gap spanning several tiles is counted whole in its centroid tile.
+- **Flagged pairs:** 823 gaps (0.05%) lie on them. |
 | M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up |
 
 M4 can run while M3's ADR is being finalised, since step 1 doesn't depend on the threshold.
@@ -827,8 +837,11 @@ Decisions still open. None blocks building M2.
      this happens in M3.
 4. **The between-flight test at pair borders** (§4.1): which strip to use and what
    counts as a pass. Design it with M3.
-5. **Flagged pairs** (§4.7, D7): rank 5 is corrected (+41.82 m). Whether any of the 16
-   moderate pairs are corrected or excluded is decided in M3, after ADR 009's noise
-   test on one of them, and before M5 results are examined.
+5. **Flagged pairs** (§4.7, D7): rank 5 is corrected (+41.82 m). **Settled
+   2026-11-21 (user):** the 16 moderate pairs are kept and flagged, with none corrected
+   or excluded. Results are reported with and without them (`main_pair_flagged`).
+   - No flagged-pair noise test was possible. Rank 149 was the only flagged pair in
+     either null: one unit with 0.12 ha covered by both flights.
+   - The decision rests on their small share: 0.04% of 2 m gaps.
 6. **Benchmarks:** the untiled EV1 figures are in §5. M3 replaces them with per-unit
    measurements.
