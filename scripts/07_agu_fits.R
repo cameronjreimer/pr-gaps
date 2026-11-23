@@ -89,9 +89,9 @@ compare_scenario <- function(x, name, title) {
   ggsave(file.path(dir_out, sprintf("ccdf_%s.png", name)), p, width = 7, height = 5.5, dpi = 200)
   tab
 }
-compare_scenario(g$size, "all", "All 3 m gaps in C-CAP forest")
-compare_scenario(g[is_largest == FALSE]$size, "no_largest", "Without gaps >= 25 ha")
-compare_scenario(g[touches_coverage_edge == FALSE]$size, "no_edge", "Without gaps touching a coverage edge")
+invisible(compare_scenario(g$size, "all", "All 3 m gaps in C-CAP forest"))
+invisible(compare_scenario(g[is_largest == FALSE]$size, "no_largest", "Without gaps >= 25 ha"))
+invisible(compare_scenario(g[touches_coverage_edge == FALSE]$size, "no_edge", "Without gaps touching a coverage edge"))
 
 ## --- Power-law alpha with a tile bootstrap ----------------------------------
 alpha_of <- function(sizes) {
@@ -124,7 +124,7 @@ fwrite(strat, file.path(dir_out, "alpha_stratum.csv"))
 strat[, stratum := factor(stratum, levels = rev(c("all", STRATA)))]
 p <- ggplot(strat, aes(alpha, stratum)) +
   geom_vline(xintercept = strat[stratum == "all"]$alpha, linetype = 3, colour = "grey50") +
-  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.2) + geom_point(size = 2.5) +
+  geom_errorbar(aes(xmin = lo, xmax = hi), width = 0.2, orientation = "y") + geom_point(size = 2.5) +
   geom_text(aes(label = format(n_tail, big.mark = ",")), vjust = -1, size = 3, colour = "grey40") +
   labs(x = expression("Power-law exponent" ~ alpha ~ "(95% tile bootstrap)"), y = NULL,
        title = "Gap size exponent by forest type", subtitle = sprintf("3 m gaps >= %g m2", XMIN)) +
