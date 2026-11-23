@@ -180,7 +180,8 @@ def tile_columns(root, tile):
     path = root / "tiles" / tile / name / "voxels.parquet"
     if not path.is_file():
         return pd.DataFrame(columns=["gap", "ix", "iy"])
-    cols = pd.read_parquet(path, columns=["label", "ix", "iy"]).drop_duplicates()
+    # Some tiles store ix/iy as float64 (whole numbers): cast before indexing with them.
+    cols = pd.read_parquet(path, columns=["label", "ix", "iy"]).astype(np.int64).drop_duplicates()
     offset = pd.read_csv(root / "gaps" / name / "nodes.csv").set_index("tile").at[tile, "offset"]
     node_gap = np.load(root / "gaps" / name / "node_gap.npy", mmap_mode="r")
     cols["gap"] = np.asarray(node_gap[offset + cols.label.to_numpy(np.int64) - 1], np.int64)
