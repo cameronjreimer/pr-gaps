@@ -53,3 +53,13 @@
 
 **Not in the draft:** spatial regression, the seeded split, the test between flights at
 pair borders, and the recovery period.
+
+## Status (2026-11-23)
+
+- **Steps 0 and 1 at 3 m are done.** Outputs: `analysis/gaps_3m.csv` and `analysis/gap_area.csv`.
+- **Step 1 at 2 m** waits on `gapcov` at 2 m (`/workdir/cr657/m3/run_gapcov_2m.sh`). Then run
+  `agu_table.py area --threshold 2 3`.
+- **Steps 2–4 are done** with `scripts/07_agu_fits.R` (200-replicate tile bootstrap, about
+  1 min). Outputs are in `analysis/fits/`.
+- **The island xmin is 311 m²,** so the fits describe only the 39,386 largest of the
+  1,550,280 gaps in forest (2.5%).

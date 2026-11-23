@@ -83,6 +83,7 @@ compare_scenario <- function(x, name, title) {
     geom_point(data = ccdf, aes(x, p), colour = "grey45", size = 0.6) +
     geom_line(data = curves, aes(x, p, colour = model), linewidth = 0.8) +
     scale_x_log10() + scale_y_log10() + scale_colour_manual(values = cols, name = NULL) +
+    coord_cartesian(ylim = c(min(ccdf$p) / 5, 1)) +   # the exponential falls far below the data
     labs(x = expression("Gap area" ~ (m^2)), y = expression(P(X >= x ~ "|" ~ X >= x[min])),
          title = title, subtitle = sprintf("%s gaps >= xmin = %g m2", format(t$n, big.mark = ","), XMIN)) +
     theme_bw(12) + theme(legend.position = c(0.02, 0.02), legend.justification = c(0, 0))
