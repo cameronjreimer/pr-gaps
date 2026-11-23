@@ -26,8 +26,8 @@ each. Planning only — nothing here is implemented yet.
 
 | Role | Layer | Source | Default |
 |---|---|---|---|
-| Forest mask | Hansen Global Forest Change: `treecover2000`, `lossyear`, `datamask` | UMD / GLAD | **default** (ADR 007) |
-| Forest mask, comparison | NOAA C-CAP Puerto Rico 2010 (high-res and 30 m) | NOAA Digital Coast | compare later |
+| Forest mask | NOAA C-CAP Puerto Rico 2010 (30 m; forest codes 9, 10, 11, 13, 16) | NOAA Digital Coast | **mask** (ADR 007, chosen 2026-11-23; keep gaps with forest fraction ≥ 0.5) |
+| Forest mask, comparison | Hansen Global Forest Change: `treecover2000`, `lossyear`, `datamask` | UMD / GLAD | sensitivity (was the provisional default) |
 | Forest type candidate | Puerto Rico GAP land cover (Gould et al. 2008, ~2000 imagery), aggregated | USGS ScienceBase | §3.2 |
 | Forest type candidate | Holdridge life zones (Ewel & Whitmore 1973) | USFS IITF | §3.2 |
 | Forest type candidate | Land cover and forest formations circa 2000 (Kennaway & Helmer 2023, successor to Helmer et al. 2002) | USFS RDS-2023-0022 | §3.2 |
@@ -121,8 +121,8 @@ resolution, PRISM PR resolution.
 - **Collinearity.** Holdridge zones are defined by rainfall and temperature,
   and temperature tracks elevation. Keep all three so the redundancy can be
   shown rather than assumed.
-- **Mask threshold.** The Hansen tree-cover threshold is an analysis-time
-  choice; 30% is a placeholder. Open-canopied dry forest on the south coast may
-  fall below it.
+- **Mask threshold.** Settled 2026-11-23: the mask is C-CAP (ADR 007), so no
+  Hansen tree-cover threshold is needed. Hansen at 10, 30 and 50% is kept per gap
+  for sensitivity checks.
 - **Hansen misses post-2000 regrowth** — see ADR 007; the C-CAP comparison
   measures how much it matters.

@@ -485,7 +485,7 @@ per 2017 point per threshold, as in D5.
 
 ### 4.6 Post-processing (masking after C2C)
 
-- **Forest fraction per gap:** Hansen per ADR 007, plus C-CAP for the comparison. This
+- **Forest fraction per gap:** C-CAP 2010 per ADR 007 (chosen 2026-11-23; Hansen kept for sensitivity). This
   extends `scripts/04_gap_covariates.R` with the pre-registered keep rule (e.g. forest
   fraction ≥ 0.5).
 - **Covariates per gap:** via the existing script.
@@ -753,7 +753,7 @@ sensitivity set.
   - The biggest gaps are canopy-level sheets about 3.5 m deep, with mean HAG around 18 m, on unflagged pairs: widespread crown loss joined into one component, not ground or registration error.
   - Caveat: a gap spanning several tiles is counted whole in its centroid tile.
 - **Flagged pairs:** 823 gaps (0.05%) lie on them. |
-| M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up. **Built 2026-11-21:** `gap_covariates.py` for the 3 m gap objects (§8). After it runs, the user picks the Hansen threshold and keep rule from `mask_comparison.csv` and `areas.csv`. Gap-size fits are reported with and without the largest objects (ADR 009 *Outcome*) |
+| M6 | Post-processing: forest mask, covariates, area accounting | Masked area per forest type recorded; mask comparison (ADR 007) written up. **Built 2026-11-21:** `gap_covariates.py` for the 3 m gap objects (§8). **Run 2026-11-23:** all 1,805,219 gaps, under commits 66a5734 and 4a4a2d5 (an int-cast fix for 66 tiles). **Mask chosen by the user on 2026-11-23: C-CAP 2010, keeping gaps with `forest_ccap_frac` ≥ 0.5** (ADR 007 *Outcome*). That keeps 85.9% of gaps and 92.4% of gap volume, but only 60.0% of gaps in dry forest. Area denominators use `forest_ccap_ha`. Gap-size fits are reported with and without the largest objects (ADR 009 *Outcome*) |
 
 M4 can run while M3's ADR is being finalised, since step 1 doesn't depend on the threshold.
 
