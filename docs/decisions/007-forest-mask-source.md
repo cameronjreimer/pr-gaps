@@ -73,8 +73,7 @@ the share of gaps whose forest fraction is ≥ 0.5:
 - The forest mask is **C-CAP 2010 (30 m)**: codes 9, 10, 11, 13 and 16, as `area.py`
   defines them (`CCAP_FOREST`).
 - A gap is kept when **`forest_ccap_frac` ≥ 0.5**. That is the rule the comparison
-  tabulated. The ≥ 0.5 cut-off was assumed when this was recorded, not stated by the
-  user, so it should be confirmed.
+  tabulated; the user confirmed the cut-off on 2026-11-23.
 - Area denominators use the same mask: `forest_ccap_ha` in `runs/canopy/area/<id>/areas.csv`.
 - Hansen fractions (10, 30 and 50%) and the union and intersection stay in
   `gaps_covariates.parquet` for sensitivity checks.
