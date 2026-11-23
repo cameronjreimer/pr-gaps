@@ -57,8 +57,12 @@ pair borders, and the recovery period.
 ## Status (2026-11-23)
 
 - **Steps 0 and 1 at 3 m are done.** Outputs: `analysis/gaps_3m.csv` and `analysis/gap_area.csv`.
-- **Step 1 at 2 m** waits on `gapcov` at 2 m (`/workdir/cr657/m3/run_gapcov_2m.sh`). Then run
-  `agu_table.py area --threshold 2 3`.
+- **Step 1 at 2 m is done** (2026-11-23). The gap fraction of the C-CAP forest covered
+  by both flights is 44.5% at 2 m (17,328 ha) and 26.9% at 3 m (10,487 ha).
+  - Wet: 51.3% at 2 m, 31.9% at 3 m.
+  - Moist: 44.0% and 26.6%.
+  - Montane: 35.1% and 17.0%.
+  - Dry: 14.0% and 7.1%.
 - **Steps 2–4 are done** with `scripts/07_agu_fits.R` (200-replicate tile bootstrap, about
   1 min). Outputs are in `analysis/fits/`.
 - **The island xmin is 311 m²,** so the fits describe only the 39,386 largest of the
