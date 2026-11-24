@@ -4,10 +4,11 @@
 ##
 ##   module load R/4.5.2
 ##   Rscript scripts/07_agu_fits.R            # from the repo root
+##   AGU_XMIN=10 Rscript scripts/07_agu_fits.R   # fixed xmin, writes fits/xmin_10/
 ##
 ## Reads  runs/canopy/island/<run>/analysis/gaps_3m.csv  (python/agu_table.py table)
-## Writes runs/canopy/island/<run>/analysis/fits/:
-##   xmin.txt                 the island-wide lower bound (KS, poweRlaw)
+## Writes runs/canopy/island/<run>/analysis/fits/ (or fits/xmin_<v>/ with AGU_XMIN):
+##   xmin.txt                 the island-wide lower bound (KS, poweRlaw, or AGU_XMIN)
 ##   compare_<scenario>.csv   step 2: six models, same gaps >= xmin (06's code)
 ##   ccdf_<scenario>.png      step 2: CCDF with every fitted model
 ##   alpha_stratum.csv/.png   step 3: power-law alpha per stratum
@@ -15,6 +16,10 @@
 ## Scenarios: all gaps; without the >= 25 ha objects (ADR 009 Outcome); without
 ## gaps touching a coverage edge (sensitivity: their sizes are truncated).
 ##
+## WHY AGU_XMIN: the KS estimate (311 m2) keeps only the top 2.5% of gaps; the
+## distribution bends, so KS distance falls as xmin rises. A fixed xmin set by
+## resolution (5 or 10 m2, user 2026-11-24) uses most gaps; alpha is then an
+## apparent exponent and the step 2 table shows how well a power law fits.
 ## WHY xmin is fixed island-wide in steps 3-4: alpha depends on xmin, so groups
 ## fitted above different lower bounds are not comparable. Each group's own
 ## xmin is reported as a check.
@@ -38,7 +43,8 @@ STRATA    <- c("dry", "moist", "wet", "montane")
 set.seed(20170920)
 
 dir_in  <- file.path(DATA, "runs", "canopy", "island", RUN, "analysis")
-dir_out <- file.path(dir_in, "fits")
+FIXED   <- Sys.getenv("AGU_XMIN", "")
+dir_out <- file.path(dir_in, "fits", if (nzchar(FIXED)) paste0("xmin_", FIXED) else "")
 dir.create(dir_out, showWarnings = FALSE, recursive = TRUE)
 say <- function(...) cat(format(Sys.time(), "[%H:%M:%S] "), sprintf(...), "\n", sep = "")
 
@@ -52,7 +58,7 @@ estimate_xmin_grid <- function(x) {
   cand <- unique(round(exp(seq(log(min(x)), log(quantile(x, 0.99)), length.out = 40))))
   suppressMessages(estimate_xmin(m, xmins = cand))$xmin
 }
-XMIN <- estimate_xmin_grid(g$size)
+XMIN <- if (nzchar(FIXED)) as.numeric(FIXED) else estimate_xmin_grid(g$size)
 writeLines(as.character(XMIN), file.path(dir_out, "xmin.txt"))
 say("island xmin = %g m2; %d gaps above it", XMIN, sum(g$size >= XMIN))
 
