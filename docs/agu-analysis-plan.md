@@ -67,3 +67,34 @@ pair borders, and the recovery period.
   1 min). Outputs are in `analysis/fits/`.
 - **The island xmin is 311 m²,** so the fits describe only the 39,386 largest of the
   1,550,280 gaps in forest (2.5%).
+
+## xmin (user, 2026-11-24)
+
+The KS estimate (311 m²) keeps only 2.5% of gaps. The size distribution bends, so the KS
+distance keeps falling as xmin rises and the method moves into the far tail. Following the
+user's choice, the fits were rerun at fixed xmin = 10 and 5 m², set by resolution
+(`AGU_XMIN=… Rscript scripts/07_agu_fits.R`, outputs in `fits/xmin_<v>/`). A scan of α by
+stratum and gradient over xmin = 5–311 m² was added as a sensitivity check
+(`scripts/08_xmin_sensitivity.R`, outputs in `fits/xmin_sensitivity/`).
+
+- **Best model:** lognormal at both 5 and 10 m². The power law is far behind
+  (ΔAIC 48,712 at 5 m², 15,962 at 10 m²). Without gaps touching a coverage edge, Weibull
+  is best at 10 m² and lognormal at 5 m².
+- **α (tile bootstrap 95%),** xmin 10 / 5 m²:
+  - all: 1.797 / 1.706;
+  - dry: 1.852 / 1.731;
+  - moist: 1.779 / 1.690;
+  - wet: 1.802 / 1.714;
+  - montane: 1.897 / 1.756.
+- **The order holds at every xmin** (montane and dry steepest; moist and wet together),
+  but the spread shrinks at low xmin.
+- **Gradients at 10 m²:**
+  - α is highest under the shortest canopy (2.01);
+  - it is U-shaped with slope;
+  - it rises weakly with elevation (1.77 → 1.83) and in the wettest quintile.
+- **Local exponent of the lognormal,** α(x) = 1 + (ln x − μ)/σ², island-wide:
+  - α(100 m²) = 1.81 at both xmin values;
+  - α(10) ≈ 1.5 and α(1,000) ≈ 2.1–2.2.
+
+  α(x) is a candidate α-like comparison when the lognormal fits best (not yet computed
+  per stratum).
